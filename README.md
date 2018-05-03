@@ -15,14 +15,14 @@ On Raijin:
 
 ## Use
 
-TODO: Use like
+Use like
 
-    mppnccombine-fast out.nc input.nc.0000 input.nc.0001 input.nc.0002
+    mppnccombine-fast --output out.nc input.nc.0000 input.nc.0001 input.nc.0002
 
 Files will be collated along the `xt_ocean` and `yt_ocean` dimensions
 
 
 TODO: MPI can also be used
 
-   mpirun mppnccombine-fast out.nc input.nc.0000 input.nc.0001 input.nc.0002
+   mpirun mppnccombine-fast --output out.nc input.nc.0000 input.nc.0001 input.nc.0002
 

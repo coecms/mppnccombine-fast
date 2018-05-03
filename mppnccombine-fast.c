@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <argp.h>
 
 #define NCERR(x) handle_nc_error(x, __FILE__, __LINE__)
 void handle_nc_error(int err, const char * file, int line) {
@@ -235,10 +236,54 @@ void copy(const char * in_path, hid_t out_var) {
     H5ERR(H5Fclose(in_file));
 }
 
+struct args_t {
+    const char * output;
+};
+
+static char doc[] = "Quickly collate MOM output files";
+
+static struct argp_option opts[] = {
+    {"output", 'o', "FILE", 0, "Output file"},
+    {0},
+};
+
+static error_t parse_opt(int key, char *arg, struct argp_state * state) {
+    struct args_t * args = state->input;
+
+    switch(key) {
+        case 'o':
+            args->output = arg;
+            break;
+        default:
+            return ARGP_ERR_UNKNOWN;
+    }
+
+    return 0;
+}
+
+static struct argp argp = {
+    .parser = parse_opt,
+    .options = opts,
+    .doc = doc,
+};
+
 int main(int argc, char ** argv) {
 
-    char in_path[] = "/short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.0000";
-    const char * out_path = "/g/data/w35/saw562/test.nc";
+    int arg_index;
+    struct args_t args = {0};
+
+    argp_parse(&argp, argc, argv, 0, &arg_index, &args);
+    if (args.output == NULL) {
+        fprintf(stderr, "ERROR: No output file specified\n");
+        exit(-1);
+    }
+    if (arg_index == argc) {
+        fprintf(stderr, "ERROR: No input files specified\n");
+        exit(-1);
+    }
+
+    const char * in_path = argv[arg_index];
+    const char * out_path = args.output;
 
     init(in_path, out_path);
 
@@ -247,10 +292,9 @@ int main(int argc, char ** argv) {
 
     hid_t out_var = H5Dopen(out_file, "/temp", H5P_DEFAULT);
     H5ERR(out_var);
-
-    for (int i=0; i<25; ++i) {
-        sprintf(in_path, "/short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.%04d", i);
-        copy(in_path, out_var);
+    
+    for (int i=arg_index; i<argc; ++i) {
+        copy(argv[i], out_var);
     }
 
     H5ERR(H5Dclose(out_var));

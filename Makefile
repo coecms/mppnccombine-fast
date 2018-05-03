@@ -9,7 +9,7 @@ LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 #
 
 test: mppnccombine-fast
-	time ./mppnccombine-fast /g/data/${PROJECT}/${USER}/test.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.????
-	./view.py /g/data/${PROJECT}/${USER}/test.nc
+	time ./mppnccombine-fast --output /g/data/${PROJECT}/${USER}/test.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.{0000,0001,0005}
+	module purge; module load conda; ./view.py /g/data/${PROJECT}/${USER}/test.nc
 
 all: mppnccombine-fast
