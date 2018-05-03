@@ -8,12 +8,8 @@ LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 # Use `module load netcdf/4.6.1 hdf5/1.10.2`
 #
 
-all: run_combo
+test: mppnccombine-fast
+	time ./mppnccombine-fast /g/data/${PROJECT}/${USER}/test.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.????
+	./view.py /g/data/${PROJECT}/${USER}/test.nc
 
-run_h5collate: h5collate
-	./h5collate
-	touch $@
-
-run_combo: combo
-	time ./combo
-	touch $@
+all: mppnccombine-fast
