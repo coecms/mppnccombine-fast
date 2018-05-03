@@ -96,16 +96,19 @@ void init(const char * in_path, const char * out_path) {
 }
 */
 
-void copy(const char * in_path, const char * out_path) {
-    hid_t in_file = H5Fopen(in_path, H5F_ACC_RDONLY, H5P_DEFAULT);
-    hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, H5P_DEFAULT);
 
-    const int ndims = 4;
-    int shape[4] = {240,75,540,720};
-    int chunk[4] = {1,19,135,180};
-
-    hid_t in_var = H5Dopen(in_file, "/temp", H5P_DEFAULT);
-    hid_t out_var = H5Dopen(out_file, "/temp", H5P_DEFAULT);
+int hdf5_raw_copy(
+        hid_t out_var,          // Output hdf5 variable
+        const int out_offset[], // Output offset [ndims]
+        hid_t in_var,           // Input hdf5 variable
+        const int in_offset[],  // Input offset [ndims]
+        const int shape[],      // Shape to copy [ndims]
+        int ndims               // Number of dimensions
+) {
+    // Get the chunk metadata
+    hsize_t chunk[ndims];
+    hid_t in_plist = H5Dget_create_plist(in_var);
+    H5Pget_chunk(in_plist, ndims, chunk);
 
     // Get the number of chunks, total and in each dim
     int n_chunks = 1;
@@ -115,31 +118,56 @@ void copy(const char * in_path, const char * out_path) {
         n_chunks *= chunk_decomp[d];
     }
 
+    // Buffer 
     size_t n_buffer = 1024^3;
     void * buffer = malloc(n_buffer);
+
+    hsize_t copy_out_offset[ndims];
+    hsize_t copy_in_offset[ndims];
     
+    // Loop over all the chunks
     for (int c=0; c<n_chunks; ++c) {
         hsize_t offset[ndims];
         int i = c;
         for (int d=3; d>=0; --d) {
             offset[d] = (i % chunk_decomp[d]) * chunk[d];
             i /= chunk_decomp[d];
+
+            copy_out_offset[d] = out_offset[d] + offset[d];
+            copy_in_offset[d]  = in_offset[d]  + offset[d];
         }
 
+        // Get the block size
         hsize_t block_size;
-        H5Dget_chunk_storage_size(in_var, offset, &block_size);
+        H5Dget_chunk_storage_size(in_var, copy_in_offset, &block_size);
 
+        // Make sure the buffer is large enough
         if (block_size > n_buffer) {
             n_buffer = block_size;
             buffer = realloc(buffer, n_buffer);
         }
 
-        int filter_mask = 0;
-        H5DOread_chunk(in_var, H5P_DEFAULT, offset, &filter_mask, buffer);
-        H5DOwrite_chunk(out_var, H5P_DEFAULT, filter_mask, offset, block_size, buffer);
-
-        fprintf(stdout, "%d %d %d %d\n",offset[0], offset[1], offset[2], offset[3]);
+        // Copy this chunk's block
+        uint32_t filter_mask = 0;
+        H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer);
+        H5DOwrite_chunk(out_var, H5P_DEFAULT, filter_mask, copy_out_offset, block_size, buffer);
     }
+
+    return 0;
+}
+
+void copy(const char * in_path, const char * out_path) {
+    hid_t in_file = H5Fopen(in_path, H5F_ACC_RDONLY, H5P_DEFAULT);
+    hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, H5P_DEFAULT);
+
+    const int ndims = 4;
+    int shape[4] = {240,75,540,720};
+
+    hid_t in_var = H5Dopen(in_file, "/temp", H5P_DEFAULT);
+    hid_t out_var = H5Dopen(out_file, "/temp", H5P_DEFAULT);
+
+    int offset[] = {0,0,0,0};
+    hdf5_raw_copy(out_var, offset, in_var, offset, shape, ndims);
 }
 
 int main(int argc, char ** argv) {

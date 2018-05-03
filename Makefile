@@ -1,6 +1,12 @@
-CFLAGS=-std=c99 -Wall -check-pointers=rw -g -traceback -I/apps/hdf5/1.10.2/include
+CFLAGS  = -std=c99 -Wall -check-pointers=rw -g -traceback
+LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
-LDLIBS= -lhdf5 -lhdf5_hl
+# # Conda
+# CFLAGS += -I${CONDA_PREFIX}/include
+# LDFLAGS = -L${CONDA_PREFIX}/lib -Wl,-rpath=${CONDA_PREFIX}/lib
+#
+# Use `module load netcdf/4.6.1 hdf5/1.10.2`
+#
 
 all: run_combo
 
