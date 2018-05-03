@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-//#include "netcdf.h"
+#include "netcdf.h"
 #include "hdf5.h"
 #include "hdf5_hl.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-/*
 #define NCERR(x) handle_error(x, __FILE__, __LINE__)
 void handle_error(int err, const char * file, int line) {
     if (err != 0) {
@@ -32,6 +32,18 @@ void handle_error(int err, const char * file, int line) {
         fprintf(stderr, "ERROR %s:%d %s\n", file, line, message);
         exit(-1);
     }
+}
+
+void get_collated_dim_decomp(int ncid, const char * varname, int decomposition[4]) {
+    int varid;
+    NCERR(nc_inq_varid(ncid, varname, &varid)); 
+    NCERR(nc_get_att(ncid, varid, "domain_decomposition", decomposition));
+}
+
+void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
+    int decomposition[4];
+    get_collated_dim_decomp(ncid, varname, decomposition);
+    *len = decomposition[1];
 }
 
 void init(const char * in_path, const char * out_path) {
@@ -50,6 +62,14 @@ void init(const char * in_path, const char * out_path) {
         int dimid;
 
         NCERR(nc_inq_dim(in_file, d, name, &len));
+
+        if (strcmp(name, "xt_ocean") == 0) {
+            get_collated_dim_len(in_file, name, &len);
+        }
+        if (strcmp(name, "yt_ocean") == 0) {
+            get_collated_dim_len(in_file, name, &len);
+        }
+
         NCERR(nc_def_dim(out_file, name, len, &dimid));
 
         assert(dimid == d);
@@ -94,7 +114,6 @@ void init(const char * in_path, const char * out_path) {
     NCERR(nc_close(in_file));
     NCERR(nc_close(out_file));
 }
-*/
 
 
 int hdf5_raw_copy(
@@ -175,7 +194,7 @@ int main(int argc, char ** argv) {
     const char * in_path = "/short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.0000";
     const char * out_path = "test.nc";
 
-    //init(in_path, out_path);
+    init(in_path, out_path);
     
     copy(in_path, out_path);
 

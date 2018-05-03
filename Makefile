@@ -1,4 +1,4 @@
-CFLAGS  = -std=c99 -Wall -check-pointers=rw -g -traceback
+CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
 LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
 # # Conda
