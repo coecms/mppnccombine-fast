@@ -15,5 +15,5 @@ run_h5collate: h5collate
 	touch $@
 
 run_combo: combo
-	./combo
+	time ./combo
 	touch $@
