@@ -71,7 +71,7 @@ void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
 void get_out_offset_4d(int ncid, int out_offset[4]) {
     out_offset[0] = 0;
     out_offset[1] = 0;
-    
+
     int decomposition[4];
     get_collated_dim_decomp(ncid, "yt_ocean", decomposition);
     out_offset[2] = decomposition[2]-1;
@@ -85,8 +85,8 @@ void get_out_offset_4d(int ncid, int out_offset[4]) {
 // total_size[ndims] - The total collated size of this variable
 // returns true if any of the dimensions are collated
 bool get_collation_info(int ncid, int varid,
-                        int in_offset[], int out_offset[],
-                        int local_size[], int total_size[],
+                        size_t in_offset[], size_t out_offset[],
+                        size_t local_size[], size_t total_size[],
                         int ndims) {
 
     // Get the dimension ids
@@ -126,18 +126,19 @@ bool get_collation_info(int ncid, int varid,
 
 // Returns true if any of the dimensions are collated
 bool is_collated(int ncid, int varid) {
-   int ndims;
-   NCERR(nc_inq_varndims(ncid, varid, &ndims));
+    int ndims;
+    NCERR(nc_inq_varndims(ncid, varid, &ndims));
 
-   int in_offset[ndims];
-   int out_offset[ndims];
-   int local_size[ndims];
-   int total_size[ndims];
+    size_t in_offset[ndims];
+    size_t out_offset[ndims];
+    size_t local_size[ndims];
+    size_t total_size[ndims];
 
-   return get_collation_info(ncid, varid, in_offset, out_offset, local_size, total_size, ndims);
+    return get_collation_info(ncid, varid, in_offset, out_offset, local_size, total_size, ndims);
 }
 
 // Copy an uncollated field
+/*
 void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
     int ndims;
     NCERR(nc_inq_varndims(ncid_in, varid_in, &ndims));
@@ -156,6 +157,46 @@ void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
     NCERR(nc_get_var(ncid_in, varid_in, buffer));
     NCERR(nc_put_var(ncid_out, varid_out, buffer));
     free(buffer);
+}
+*/
+
+void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
+    int ndims;
+    NCERR(nc_inq_varndims(ncid_in, varid_in, &ndims));
+
+    size_t in_offset[ndims];
+    size_t out_offset[ndims];
+    size_t local_size[ndims];
+    size_t total_size[ndims];
+
+    get_collation_info(ncid_in, varid_in, in_offset, out_offset, local_size, total_size, ndims);
+
+    size_t size = 1;
+    for (int d=0; d<ndims; ++d) {
+        size *= local_size[d];
+    }
+
+    void * buffer = malloc(size * 8);
+    NCERR(nc_get_vara(ncid_in, varid_in, in_offset, local_size, buffer));
+    NCERR(nc_put_vara(ncid_out, varid_out, out_offset, local_size, buffer));
+    free(buffer);
+}
+
+void copy_attrs(int ncid_out, int varid_out, int ncid_in, int varid_in, int natts) {
+    int buffer_len = 1024*8;
+    char buffer[buffer_len];
+
+    for (int a=0; a<natts; ++a) {
+        char attname[NC_MAX_NAME+1];
+        nc_type atttype;
+        size_t attlen;
+        NCERR(nc_inq_attname(ncid_in, varid_in, a, attname));
+        NCERR(nc_inq_att(ncid_in, varid_in, attname, &atttype, &attlen));
+        // Check the buffer is big enough
+        assert(attlen * 8 < buffer_len);
+        NCERR(nc_get_att(ncid_in, varid_in, attname, buffer));
+        NCERR(nc_put_att(ncid_out, varid_out, attname, atttype, attlen, buffer));
+    }
 }
 
 void init(const char * in_path, const char * out_path) {
@@ -207,19 +248,28 @@ void init(const char * in_path, const char * out_path) {
         int storage;
         size_t chunk[ndims];
         NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
-        NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
+        if (storage == NC_CHUNKED) {
+            fprintf(stdout, "%s chunked\n", name);
+            NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
+        }
 
         int shuffle;
         int deflate;
         int deflate_level;
         NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
-        NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
+        if (shuffle || deflate) {
+            NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
+        }
 
         int no_fill;
         double fill_buffer[1] = {0,};
         NCERR(nc_inq_var_fill(in_file, v, &no_fill, fill_buffer));
-        NCERR(nc_def_var_fill(out_file, out_v, no_fill, fill_buffer));
-        fprintf(stdout, "%s %f\n", name, fill_buffer[0]);
+        if (!no_fill) {
+            NCERR(nc_def_var_fill(out_file, out_v, no_fill, fill_buffer));
+        }
+        fprintf(stdout, "%s %d %f\n", name, no_fill, fill_buffer[0]);
+
+        copy_attrs(out_file, v, in_file, v, natts);
 
         if (! is_collated(in_file, v)) {
             fprintf(stdout, "NetCDF copy of %s\n", name);
@@ -235,10 +285,10 @@ void init(const char * in_path, const char * out_path) {
 
 int hdf5_raw_copy(
                   hid_t out_var,          // Output hdf5 variable
-                  const int out_offset[], // Output offset [ndims]
+                  const size_t out_offset[], // Output offset [ndims]
                   hid_t in_var,           // Input hdf5 variable
-                  const int in_offset[],  // Input offset [ndims]
-                  const int shape[],      // Shape to copy [ndims]
+                  const size_t in_offset[],  // Input offset [ndims]
+                  const size_t shape[],      // Shape to copy [ndims]
                   int ndims               // Number of dimensions
                  ) {
     // Get the chunk metadata
@@ -265,7 +315,7 @@ int hdf5_raw_copy(
     for (int c=0; c<n_chunks; ++c) {
         hsize_t offset[ndims];
         int i = c;
-        for (int d=3; d>=0; --d) {
+        for (int d=ndims-1; d>=0; --d) {
             offset[d] = (i % chunk_decomp[d]) * chunk[d];
             i /= chunk_decomp[d];
 
@@ -276,8 +326,8 @@ int hdf5_raw_copy(
         /*
         // Debugging
         if (c < 2) {
-            fprintf(stdout, "in  % 4zu % 4zu % 4zu % 4zu\n", copy_in_offset[0], copy_in_offset[1], copy_in_offset[2], copy_in_offset[3]);
-            fprintf(stdout, "out % 4zu % 4zu % 4zu % 4zu\n", copy_out_offset[0], copy_out_offset[1], copy_out_offset[2], copy_out_offset[3]);
+        fprintf(stdout, "in  % 4zu % 4zu % 4zu % 4zu\n", copy_in_offset[0], copy_in_offset[1], copy_in_offset[2], copy_in_offset[3]);
+        fprintf(stdout, "out % 4zu % 4zu % 4zu % 4zu\n", copy_out_offset[0], copy_out_offset[1], copy_out_offset[2], copy_out_offset[3]);
         }
         */
 
@@ -300,7 +350,7 @@ int hdf5_raw_copy(
     return 0;
 }
 
-void copy(const char * in_path, hid_t out_var, const char * varname) {
+void chunked_copy(const char * in_path, hid_t out_var, const char * varname) {
     int in_nc4;
     NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
 
@@ -310,10 +360,10 @@ void copy(const char * in_path, hid_t out_var, const char * varname) {
     int ndims;
     NCERR(nc_inq_varndims(in_nc4, varid, &ndims));
 
-    int in_offset[ndims];
-    int out_offset[ndims];
-    int local_shape[ndims];
-    int global_shape[ndims];
+    size_t in_offset[ndims];
+    size_t out_offset[ndims];
+    size_t local_shape[ndims];
+    size_t global_shape[ndims];
 
     get_collation_info(in_nc4, varid, in_offset, out_offset, local_shape, global_shape, ndims);
     NCERR(nc_close(in_nc4));
@@ -321,12 +371,12 @@ void copy(const char * in_path, hid_t out_var, const char * varname) {
     fprintf(stdout, "HDF5 copy of %s from %s\n", varname, in_path);
     fprintf(stdout, "\tStart index ");
     for (int d=0; d<ndims; ++d) {
-        fprintf(stdout, "% 6d\t", out_offset[d]);
+        fprintf(stdout, "% 6zu\t", out_offset[d]);
     }
     fprintf(stdout, "\n");
     fprintf(stdout, "\tShape       ");
     for (int d=0; d<ndims; ++d) {
-        fprintf(stdout, "% 6d\t", local_shape[d]);
+        fprintf(stdout, "% 6zu\t", local_shape[d]);
     }
     fprintf(stdout, "\n");
 
@@ -343,6 +393,35 @@ void copy(const char * in_path, hid_t out_var, const char * varname) {
 
     H5ERR(H5Dclose(in_var));
     H5ERR(H5Fclose(in_file));
+}
+
+void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
+    fprintf(stdout, "Copying contiguous variables\n");
+
+    int out_nc4;
+    NCERR(nc_open(out_path, NC_WRITE, &out_nc4));
+
+    int nvars;
+    NCERR(nc_inq_nvars(out_nc4, &nvars));
+
+    for (int v=0; v<nvars; ++v) {
+        char varname[NC_MAX_NAME+1];
+        NCERR(nc_inq_varname(out_nc4, v, varname));
+        int storage;
+        NCERR(nc_inq_var_chunking(out_nc4, v, &storage, NULL));
+        if (storage == NC_CONTIGUOUS) {
+            if (is_collated(out_nc4, v)) {
+                for (int i=0; i<n_in; ++i) {
+                    fprintf(stdout, "Copying %s from %s\n", varname, in_paths[i]);
+                    int in_nc4;
+                    NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
+                    copy_netcdf(out_nc4, v, in_nc4, v);
+                    NCERR(nc_close(in_nc4));
+                }
+            }
+        }
+    }
+    NCERR(nc_close(out_nc4));
 }
 
 struct args_t {
@@ -396,17 +475,41 @@ int main(int argc, char ** argv) {
 
     init(in_path, out_path);
 
+    int in_nc4;
+    NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
+    int nvars;
+    NCERR(nc_inq_nvars(in_nc4, &nvars));
+    NCERR(nc_close(in_nc4));
+
+    copy_contiguous(out_path, argv+arg_index, argc-arg_index);
+
+    fprintf(stdout, "Copying chunked variables\n");
+
     hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, H5P_DEFAULT);
     H5ERR(out_file);
 
-    hid_t out_var = H5Dopen(out_file, "/temp", H5P_DEFAULT);
-    H5ERR(out_var);
+    for (int v=0; v<nvars; ++v) {
+        int in_nc4;
+        NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
+        char varname[NC_MAX_NAME+1];
+        NCERR(nc_inq_varname(in_nc4, v, varname));
+        int storage;
+        NCERR(nc_inq_var_chunking(in_nc4, v, &storage, NULL));
+        bool coll = is_collated(in_nc4, v);
+        NCERR(nc_close(in_nc4));
 
-    for (int i=arg_index; i<argc; ++i) {
-        copy(argv[i], out_var, "temp");
+        if (!coll) continue;
+
+        // Copy chunked variables
+        if (storage == NC_CHUNKED) {
+            hid_t out_var = H5Dopen(out_file, varname, H5P_DEFAULT);
+            H5ERR(out_var);
+            for (int i=arg_index; i<argc; ++i) {
+                chunked_copy(argv[i], out_var, varname);
+            }
+            H5ERR(H5Dclose(out_var));
+        }
     }
-
-    H5ERR(H5Dclose(out_var));
     H5ERR(H5Fclose(out_file));
 
     return 0;
