@@ -30,7 +30,7 @@ void handle_nc_error(int err, const char * file, int line) {
     if (err != 0) {
         const char * message = nc_strerror(err);
 
-        fprintf(stderr, "ERROR %s:%d %s\n", file, line, message);
+        fprintf(stderr, "ERROR %s:%d %d %s\n", file, line, err, message);
         exit(-1);
     }
 }
@@ -45,10 +45,20 @@ void handle_h5_error(int err, const char * file, int line) {
     }
 }
 
-void get_collated_dim_decomp(int ncid, const char * varname, int decomposition[4]) {
+// Get the decomposition attribute from a variable
+// If this is not a decomposed variable, decompositon[] is unchanged and returns false,
+// otherwise returns true
+bool get_collated_dim_decomp(int ncid, const char * varname, int decomposition[4]) {
     int varid;
-    NCERR(nc_inq_varid(ncid, varname, &varid)); 
-    NCERR(nc_get_att(ncid, varid, "domain_decomposition", decomposition));
+    int err;
+    NCERR(nc_inq_varid(ncid, varname, &varid));
+
+    err = nc_get_att(ncid, varid, "domain_decomposition", decomposition);
+    if (err == NC_ENOTATT) {
+        return false;
+    }
+    NCERR(err);
+    return true;
 }
 
 void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
@@ -68,6 +78,74 @@ void get_out_offset_4d(int ncid, int out_offset[4]) {
 
     get_collated_dim_decomp(ncid, "xt_ocean", decomposition);
     out_offset[3] = decomposition[2]-1;
+}
+
+// Get collation info from a variable
+// out_offset[ndims] - The offset in the collated array of this variable
+// total_size[ndims] - The total collated size of this variable
+// returns true if any of the dimensions are collated
+bool get_collation_info(int ncid, int varid, int out_offset[], int total_size[], int ndims) {
+    // Get the dimension ids
+    int dimids[ndims];
+    NCERR(nc_inq_vardimid(ncid, varid, dimids));
+
+    bool is_collated[ndims];
+    bool out = false;
+
+    for (int d=0; d<ndims; ++d) {
+        // Dimension name
+        char dimname[NC_MAX_NAME+1];
+        NCERR(nc_inq_dimname(ncid, dimids[d], dimname));
+
+        int decomposition[4];
+        is_collated[d] = get_collated_dim_decomp(ncid, dimname, decomposition);
+
+        if (is_collated[d]) {
+            out_offset[d] = decomposition[2] - 1;
+            total_size[d] = decomposition[1];
+        } else {
+            out_offset[d] = 0;
+            size_t len;
+            NCERR(nc_inq_dimlen(ncid, dimids[d], &len));
+            total_size[d] = len;
+        }
+
+        out = out || is_collated[d];
+    }
+
+    return out;
+}
+
+// Returns true if any of the dimensions are collated
+bool is_collated(int ncid, int varid) {
+   int ndims;
+   NCERR(nc_inq_varndims(ncid, varid, &ndims));
+
+   int out_offset[ndims];
+   int total_size[ndims];
+
+   return get_collation_info(ncid, varid, out_offset, total_size, ndims);
+}
+
+// Copy an uncollated field
+void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
+    int ndims;
+    NCERR(nc_inq_varndims(ncid_in, varid_in, &ndims));
+
+    int dimids[ndims];
+    NCERR(nc_inq_vardimid(ncid_in, varid_in, dimids));
+
+    size_t size = 1;
+    for (int d=0; d<ndims; ++d) {
+        size_t len;
+        NCERR(nc_inq_dimlen(ncid_in, dimids[d], &len));
+        size *= len;
+    }
+
+    void * buffer = malloc(size * 8);
+    NCERR(nc_get_var(ncid_in, varid_in, buffer));
+    NCERR(nc_put_var(ncid_out, varid_out, buffer));
+    free(buffer);
 }
 
 void init(const char * in_path, const char * out_path) {
@@ -132,6 +210,11 @@ void init(const char * in_path, const char * out_path) {
         NCERR(nc_inq_var_fill(in_file, v, &no_fill, fill_buffer));
         NCERR(nc_def_var_fill(out_file, out_v, no_fill, fill_buffer));
         fprintf(stdout, "%s %f\n", name, fill_buffer[0]);
+
+        if (! is_collated(in_file, v)) {
+            fprintf(stdout, "NetCDF copy of %s\n", name);
+            copy_netcdf(out_file, out_v, in_file, v);
+        }
     }
 
 
@@ -141,13 +224,13 @@ void init(const char * in_path, const char * out_path) {
 
 
 int hdf5_raw_copy(
-        hid_t out_var,          // Output hdf5 variable
-        const int out_offset[], // Output offset [ndims]
-        hid_t in_var,           // Input hdf5 variable
-        const int in_offset[],  // Input offset [ndims]
-        const int shape[],      // Shape to copy [ndims]
-        int ndims               // Number of dimensions
-) {
+                  hid_t out_var,          // Output hdf5 variable
+                  const int out_offset[], // Output offset [ndims]
+                  hid_t in_var,           // Input hdf5 variable
+                  const int in_offset[],  // Input offset [ndims]
+                  const int shape[],      // Shape to copy [ndims]
+                  int ndims               // Number of dimensions
+                 ) {
     // Get the chunk metadata
     hsize_t chunk[ndims];
     hid_t in_plist = H5Dget_create_plist(in_var);
@@ -167,7 +250,7 @@ int hdf5_raw_copy(
 
     hsize_t copy_out_offset[ndims];
     hsize_t copy_in_offset[ndims];
-    
+
     // Loop over all the chunks
     for (int c=0; c<n_chunks; ++c) {
         hsize_t offset[ndims];
@@ -292,7 +375,7 @@ int main(int argc, char ** argv) {
 
     hid_t out_var = H5Dopen(out_file, "/temp", H5P_DEFAULT);
     H5ERR(out_var);
-    
+
     for (int i=arg_index; i<argc; ++i) {
         copy(argv[i], out_var);
     }
