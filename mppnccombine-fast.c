@@ -84,7 +84,11 @@ void get_out_offset_4d(int ncid, int out_offset[4]) {
 // out_offset[ndims] - The offset in the collated array of this variable
 // total_size[ndims] - The total collated size of this variable
 // returns true if any of the dimensions are collated
-bool get_collation_info(int ncid, int varid, int out_offset[], int total_size[], int ndims) {
+bool get_collation_info(int ncid, int varid,
+                        int in_offset[], int out_offset[],
+                        int local_size[], int total_size[],
+                        int ndims) {
+
     // Get the dimension ids
     int dimids[ndims];
     NCERR(nc_inq_vardimid(ncid, varid, dimids));
@@ -101,12 +105,16 @@ bool get_collation_info(int ncid, int varid, int out_offset[], int total_size[],
         is_collated[d] = get_collated_dim_decomp(ncid, dimname, decomposition);
 
         if (is_collated[d]) {
+            in_offset[d] = 0;
             out_offset[d] = decomposition[2] - 1;
+            local_size[d] = decomposition[3] - out_offset[d];
             total_size[d] = decomposition[1];
         } else {
+            in_offset[d] = 0;
             out_offset[d] = 0;
             size_t len;
             NCERR(nc_inq_dimlen(ncid, dimids[d], &len));
+            local_size[d] = len;
             total_size[d] = len;
         }
 
@@ -121,10 +129,12 @@ bool is_collated(int ncid, int varid) {
    int ndims;
    NCERR(nc_inq_varndims(ncid, varid, &ndims));
 
+   int in_offset[ndims];
    int out_offset[ndims];
+   int local_size[ndims];
    int total_size[ndims];
 
-   return get_collation_info(ncid, varid, out_offset, total_size, ndims);
+   return get_collation_info(ncid, varid, in_offset, out_offset, local_size, total_size, ndims);
 }
 
 // Copy an uncollated field
@@ -263,10 +273,13 @@ int hdf5_raw_copy(
             copy_in_offset[d]  = in_offset[d]  + offset[d];
         }
 
+        /*
+        // Debugging
         if (c < 2) {
             fprintf(stdout, "in  % 4zu % 4zu % 4zu % 4zu\n", copy_in_offset[0], copy_in_offset[1], copy_in_offset[2], copy_in_offset[3]);
             fprintf(stdout, "out % 4zu % 4zu % 4zu % 4zu\n", copy_out_offset[0], copy_out_offset[1], copy_out_offset[2], copy_out_offset[3]);
         }
+        */
 
         // Get the block size
         hsize_t block_size;
@@ -287,35 +300,48 @@ int hdf5_raw_copy(
     return 0;
 }
 
-void copy(const char * in_path, hid_t out_var) {
-    int err;
+void copy(const char * in_path, hid_t out_var, const char * varname) {
     int in_nc4;
-    int out_offset[4] = {0,0,0,0};
-
-
     NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
-    get_out_offset_4d(in_nc4, out_offset);
+
+    int varid;
+    NCERR(nc_inq_varid(in_nc4, varname, &varid));
+
+    int ndims;
+    NCERR(nc_inq_varndims(in_nc4, varid, &ndims));
+
+    int in_offset[ndims];
+    int out_offset[ndims];
+    int local_shape[ndims];
+    int global_shape[ndims];
+
+    get_collation_info(in_nc4, varid, in_offset, out_offset, local_shape, global_shape, ndims);
     NCERR(nc_close(in_nc4));
 
-    fprintf(stdout, "% 4d % 4d % 4d % 4d %s\n", out_offset[0], out_offset[1], out_offset[2], out_offset[3], in_path);
+    fprintf(stdout, "HDF5 copy of %s from %s\n", varname, in_path);
+    fprintf(stdout, "\tStart index ");
+    for (int d=0; d<ndims; ++d) {
+        fprintf(stdout, "% 6d\t", out_offset[d]);
+    }
+    fprintf(stdout, "\n");
+    fprintf(stdout, "\tShape       ");
+    for (int d=0; d<ndims; ++d) {
+        fprintf(stdout, "% 6d\t", local_shape[d]);
+    }
+    fprintf(stdout, "\n");
+
 
     hid_t in_file = H5Fopen(in_path, H5F_ACC_RDONLY, H5P_DEFAULT);
     H5ERR(in_file);
 
-    const int ndims = 4;
-    int shape[4] = {240,75,540,720};
-
-    hid_t in_var = H5Dopen(in_file, "/temp", H5P_DEFAULT);
+    hid_t in_var = H5Dopen(in_file, varname, H5P_DEFAULT);
     H5ERR(in_var);
 
-    int in_offset[4] = {0,0,0,0};
-
-    hdf5_raw_copy(out_var, out_offset, in_var, in_offset, shape, ndims);
+    hdf5_raw_copy(out_var, out_offset, in_var, in_offset, local_shape, ndims);
 
     H5ERR(H5Fflush(out_var, H5F_SCOPE_GLOBAL));
 
     H5ERR(H5Dclose(in_var));
-
     H5ERR(H5Fclose(in_file));
 }
 
@@ -377,7 +403,7 @@ int main(int argc, char ** argv) {
     H5ERR(out_var);
 
     for (int i=arg_index; i<argc; ++i) {
-        copy(argv[i], out_var);
+        copy(argv[i], out_var, "temp");
     }
 
     H5ERR(H5Dclose(out_var));
