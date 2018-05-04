@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <argp.h>
+#include <mpi.h>
 
 #define NCERR(x) handle_nc_error(x, __FILE__, __LINE__)
 void handle_nc_error(int err, const char * file, int line) {
@@ -199,6 +200,12 @@ int hdf5_raw_copy(
         uint32_t filter_mask = 0;
         H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
         H5ERR(H5DOwrite_chunk(out_var, H5P_DEFAULT, filter_mask, copy_out_offset, block_size, buffer));
+
+        if (c % 1000 == 99) {
+            fprintf(stdout, "Flushing at %d/%d\n", c, n_chunks);
+            //H5Dflush(out_var);
+            break;
+        }
     }
 
     return 0;
@@ -228,8 +235,6 @@ void copy(const char * in_path, hid_t out_var) {
     int in_offset[4] = {0,0,0,0};
 
     hdf5_raw_copy(out_var, out_offset, in_var, in_offset, shape, ndims);
-
-    H5ERR(H5Fflush(out_var, H5F_SCOPE_GLOBAL));
 
     H5ERR(H5Dclose(in_var));
 
@@ -268,6 +273,12 @@ static struct argp argp = {
 };
 
 int main(int argc, char ** argv) {
+    MPI_Init(&argc, &argv);
+
+    int comm_size;
+    int comm_rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
 
     int arg_index;
     struct args_t args = {0};
@@ -285,20 +296,33 @@ int main(int argc, char ** argv) {
     const char * in_path = argv[arg_index];
     const char * out_path = args.output;
 
-    init(in_path, out_path);
+    if (comm_rank == 0) {
+        // Setup the headers and non-shared data fields
+        init(in_path, out_path);
+    }
 
-    hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, H5P_DEFAULT);
+    hid_t out_file_props = H5Pcreate(H5P_FILE_ACCESS);
+    H5Pset_fapl_mpio(out_file_props, MPI_COMM_WORLD, MPI_INFO_NULL);
+
+    hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, out_file_props);
     H5ERR(out_file);
 
     hid_t out_var = H5Dopen(out_file, "/temp", H5P_DEFAULT);
     H5ERR(out_var);
+
+    fprintf(stdout, "Rank %d has opened\n", comm_rank);
     
-    for (int i=arg_index; i<argc; ++i) {
+    // Loop over each input file, copying shared data fields
+    for (int i=arg_index + comm_rank; i<argc; i+=comm_size) {
         copy(argv[i], out_var);
     }
 
+    fprintf(stdout, "Rank %d is closing\n", comm_rank);
+
     H5ERR(H5Dclose(out_var));
     H5ERR(H5Fclose(out_file));
+
+    MPI_Finalize();
 
     return 0;
 }
