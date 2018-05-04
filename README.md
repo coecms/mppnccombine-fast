@@ -21,7 +21,7 @@ Use like
 
     mppnccombine-fast --output out.nc input.nc.0000 input.nc.0001 input.nc.0002
 
-Files will be collated along the `xt_ocean` and `yt_ocean` dimensions
+Files will be collated along all axes with a `domain_distribution` attribute
 
 
 TODO: MPI can also be used

@@ -67,19 +67,6 @@ void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
     *len = decomposition[1];
 }
 
-// Get the output offset for a 4d variable
-void get_out_offset_4d(int ncid, int out_offset[4]) {
-    out_offset[0] = 0;
-    out_offset[1] = 0;
-
-    int decomposition[4];
-    get_collated_dim_decomp(ncid, "yt_ocean", decomposition);
-    out_offset[2] = decomposition[2]-1;
-
-    get_collated_dim_decomp(ncid, "xt_ocean", decomposition);
-    out_offset[3] = decomposition[2]-1;
-}
-
 // Get collation info from a variable
 // out_offset[ndims] - The offset in the collated array of this variable
 // total_size[ndims] - The total collated size of this variable
@@ -176,6 +163,17 @@ void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
         size *= local_size[d];
     }
 
+    fprintf(stdout, "\tStart index ");
+    for (int d=0; d<ndims; ++d) {
+        fprintf(stdout, "% 6zu\t", out_offset[d]);
+    }
+    fprintf(stdout, "\n");
+    fprintf(stdout, "\tShape       ");
+    for (int d=0; d<ndims; ++d) {
+        fprintf(stdout, "% 6zu\t", local_size[d]);
+    }
+    fprintf(stdout, "\n");
+
     void * buffer = malloc(size * 8);
     NCERR(nc_get_vara(ncid_in, varid_in, in_offset, local_size, buffer));
     NCERR(nc_put_vara(ncid_out, varid_out, out_offset, local_size, buffer));
@@ -216,10 +214,10 @@ void init(const char * in_path, const char * out_path) {
 
         NCERR(nc_inq_dim(in_file, d, name, &len));
 
-        if (strcmp(name, "xt_ocean") == 0) {
-            get_collated_dim_len(in_file, name, &len);
-        }
-        if (strcmp(name, "yt_ocean") == 0) {
+        int varid;
+        NCERR(nc_inq_varid(in_file, name, &varid));
+
+        if (is_collated(in_file, varid)) {
             get_collated_dim_len(in_file, name, &len);
         }
 
