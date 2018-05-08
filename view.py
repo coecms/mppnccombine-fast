@@ -21,8 +21,9 @@ import xarray
 import matplotlib.pyplot as plt
 
 
-d = xarray.open_dataset('/g/data/w35/saw562/test.nc', chunks={'time': 1, 'st_ocean': 1})
-temp = d.isel(time=0, st_ocean=0).temp
+d = xarray.open_dataset('/g/data/w35/saw562/test.nc', chunks={'Time': 1, 'zaxis_1': 1})
+temp = d.isel(Time=0, zaxis_1=0).advectionv
 #d.isel(time=0, st_ocean=0).temp.plot.imshow()
-plt.imshow(temp.values)
+temp.plot.imshow()
+#plt.imshow(temp.values)
 plt.show()
