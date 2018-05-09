@@ -578,9 +578,12 @@ void copy_mpi_produce_file_variable(const char * in_path, const  char * varname)
         n_chunks *= chunk_decomp[d];
     }
 
-    // Buffer 
-    uint64_t n_buffer = 1024^3;
-    void * buffer = malloc(n_buffer);
+    // Double buffer so we can use Isend
+    uint64_t n_buffer[2] = {0};
+    void * buffer[2] = {0};
+    uint32_t filter_mask[2];
+    uint64_t block_size_64[2];
+    MPI_Request request[2][3];
 
     hsize_t copy_in_offset[ndims];
 
@@ -599,24 +602,29 @@ void copy_mpi_produce_file_variable(const char * in_path, const  char * varname)
         hsize_t block_size;
         H5ERR(H5Dget_chunk_storage_size(in_var, copy_in_offset, &block_size));
 
+        if (c >= 2) {
+            // Wait for buffer to catch up
+            MPI_Waitall(3, request[c%2], MPI_STATUS_IGNORE);
+        }
+
         // Make sure the buffer is large enough
-        if (block_size > n_buffer) {
-            n_buffer = block_size;
-            buffer = realloc(buffer, n_buffer);
+        if (block_size > n_buffer[c%2]) {
+            n_buffer[c%2] = block_size;
+            buffer[c%2] = realloc(buffer[c%2], n_buffer[c%2]);
         }
 
         // Copy this chunk's data
-        uint32_t filter_mask = 0;
-        H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
+        H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask[c%2], buffer[c%2]));
         
         // Send
-        uint64_t block_size_64 = block_size;
-        MPI_Send(&block_size_64, 1, MPI_UINT64_T, 0, TAG_CHUNK, MPI_COMM_WORLD);
-        MPI_Send(&filter_mask, 1, MPI_UINT32_T, 0, TAG_CHUNK, MPI_COMM_WORLD);
-        MPI_Send(buffer, block_size_64, MPI_CHAR, 0, TAG_CHUNK, MPI_COMM_WORLD);
+        block_size_64[c%2] = block_size;
+        MPI_Isend(&block_size_64[c%2], 1, MPI_UINT64_T, 0, TAG_CHUNK, MPI_COMM_WORLD, &(request[c%2][0]));
+        MPI_Isend(&filter_mask[c%2], 1, MPI_UINT32_T, 0, TAG_CHUNK, MPI_COMM_WORLD, &(request[c%2][1]));
+        MPI_Isend(buffer[c%2], block_size, MPI_CHAR, 0, TAG_CHUNK, MPI_COMM_WORLD, &(request[c%2][2]));
     }
 
-    free(buffer);
+    free(buffer[0]);
+    free(buffer[1]);
     H5ERR(H5Dclose(in_var));
     H5ERR(H5Fclose(in_file));
     MPI_Barrier(MPI_COMM_WORLD);
