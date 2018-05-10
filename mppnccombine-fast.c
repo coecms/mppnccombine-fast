@@ -24,28 +24,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <argp.h>
+#include <math.h>
+#include <mpi.h>
 
-// NetCDF error handler
-#define NCERR(x) handle_nc_error(x, __FILE__, __LINE__)
-void handle_nc_error(int err, const char * file, int line) {
-    if (err != 0) {
-        const char * message = nc_strerror(err);
+#include "error.h"
+#include "async.h"
 
-        fprintf(stderr, "ERROR %s:%d %d %s\n", file, line, err, message);
-        exit(-1);
-    }
-}
-
-
-// HDF5 error handler
-#define H5ERR(x) handle_h5_error(x, __FILE__, __LINE__)
-void handle_h5_error(int err, const char * file, int line) {
-    if (err < 0) {
-        fprintf(stderr, "ERROR %s:%d\n", file, line);
-        H5Eprint1(stderr);
-        exit(-1);
-    }
-}
+#define TAG_DECOMP 1
+#define TAG_CHUNK 2
 
 // Get the decomposition attribute from a variable
 // If this is not a decomposed variable, decompositon[] is unchanged and returns false,
@@ -132,6 +118,7 @@ bool is_collated(int ncid, int varid) {
 
 // Print diagnostic information about this file's collation
 void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
+    /*
     fprintf(stdout, "\tStart index ");
     for (int d=0; d<ndims; ++d) {
         fprintf(stdout, "% 6zu\t", out_offset[d]);
@@ -142,6 +129,7 @@ void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
         fprintf(stdout, "% 6zu\t", local_size[d]);
     }
     fprintf(stdout, "\n");
+    */
 }
 
 // Copy a (possibly collated) field in NetCDF mode
@@ -260,7 +248,7 @@ void init(const char * in_path, const char * out_path) {
 
         // If the field is not collated copy it now
         if (! is_collated(in_file, v)) {
-            fprintf(stdout, "Uncollated NetCDF copy of %s\n", name);
+            fprintf(stdout, "\tUncollated NetCDF copy of %s\n", name);
             copy_netcdf(out_file, out_v, in_file, v);
         }
     }
@@ -275,8 +263,8 @@ void init(const char * in_path, const char * out_path) {
 // This is faster than the normal IO as it doesn't need to de-compress and
 // re-compress the data, however it only works when the source and target
 // chunking and compression settings are identical
-int hdf5_raw_copy(
-                  hid_t out_var,             // Output hdf5 variable
+size_t hdf5_raw_copy(
+                  varid_t varid,
                   const size_t out_offset[], // Output offset [ndims]
                   hid_t in_var,              // Input hdf5 variable
                   const size_t in_offset[],  // Input offset [ndims]
@@ -330,7 +318,10 @@ int hdf5_raw_copy(
         // Copy this chunk's data
         uint32_t filter_mask = 0;
         H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
-        H5ERR(H5DOwrite_chunk(out_var, H5P_DEFAULT, filter_mask, copy_out_offset, block_size, buffer));
+
+        MPI_Request request;
+        write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
 
         total_copied_size += block_size;
     }
@@ -341,7 +332,7 @@ int hdf5_raw_copy(
 }
 
 // Copy chunked variables from the file at in_path to HDF5 variable out_var
-void copy_chunked_variable(const char * in_path, hid_t out_var, const char * varname) {
+size_t copy_chunked_variable(varid_t var_id, const char * in_path, const char * varname) {
     // Open in NetCDF mode to gather metadata
     int in_nc4;
     NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
@@ -359,7 +350,7 @@ void copy_chunked_variable(const char * in_path, hid_t out_var, const char * var
     get_collation_info(in_nc4, varid, in_offset, out_offset, local_shape, global_shape, ndims);
     NCERR(nc_close(in_nc4));
 
-    fprintf(stdout, "HDF5 copy of %s from %s\n", varname, in_path);
+    fprintf(stdout, "\tHDF5 copy of %s from %s\n", varname, in_path);
     print_offsets(out_offset, local_shape, ndims);
 
     // Open in HDF5 mode to do the copy
@@ -368,29 +359,27 @@ void copy_chunked_variable(const char * in_path, hid_t out_var, const char * var
     hid_t in_var = H5Dopen(in_file, varname, H5P_DEFAULT);
     H5ERR(in_var);
 
-    hdf5_raw_copy(out_var, out_offset, in_var, in_offset, local_shape, ndims);
+    size_t total_copied_size = hdf5_raw_copy(var_id, out_offset, in_var, in_offset, local_shape, ndims);
 
-    H5ERR(H5Fflush(out_var, H5F_SCOPE_GLOBAL));
     H5ERR(H5Dclose(in_var));
     H5ERR(H5Fclose(in_file));
+
+    return total_copied_size;
 }
 
 // Copy chunked variables - these may be compressed, so we'll use HDF5. Since
 // we can't have the same file open in both HDF5 and NetCDF4 modes we need to
 // do a bit of shuffling to get all the metadata.
-void copy_chunked(const char * out_path, char ** in_paths, int n_in) {
+void copy_chunked(char ** in_paths, int n_in) {
+    size_t total_copied_size = 0;
+    double t_start = MPI_Wtime();
+
     // Get the total number of variables
     int in_nc4;
     NCERR(nc_open(in_paths[0], NC_NOWRITE, &in_nc4));
     int nvars;
     NCERR(nc_inq_nvars(in_nc4, &nvars));
     NCERR(nc_close(in_nc4));
-
-    fprintf(stdout, "Copying chunked variables\n");
-
-    // Open the output file in HDF5 mode
-    hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, H5P_DEFAULT);
-    H5ERR(out_file);
 
     // Loop over each variable
     for (int v=0; v<nvars; ++v) {
@@ -407,21 +396,23 @@ void copy_chunked(const char * out_path, char ** in_paths, int n_in) {
 
         // Copy chunked variable from all input files
         if (storage == NC_CHUNKED) {
-            hid_t out_var = H5Dopen(out_file, varname, H5P_DEFAULT);
-            H5ERR(out_var);
+            varid_t var_id = open_variable_async(varname, NC_MAX_NAME+1, 0);
             for (int i=0; i<n_in; ++i) {
-                copy_chunked_variable(in_paths[i], out_var, varname);
+                total_copied_size += copy_chunked_variable(var_id, in_paths[i], varname);
             }
-            H5ERR(H5Dclose(out_var));
+            close_variable_async(var_id, 0);
         }
     }
-    H5ERR(H5Fclose(out_file));
+
+    double t_end = MPI_Wtime();
+    double total_size_gb = total_copied_size / pow(1024,3);
+
+    // fprintf(stdout, "Total compressed size %.2f GiB | %.2f GiB / sec\n", total_size_gb, total_size_gb/(t_end - t_start));
 }
 
 // Copy contiguous variables - no chunking means no compression, so we can just
 // use NetCDF
 void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
-    fprintf(stdout, "Copying contiguous variables\n");
 
     int out_nc4;
     NCERR(nc_open(out_path, NC_WRITE, &out_nc4));
@@ -438,7 +429,7 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
         if (storage == NC_CONTIGUOUS) {
             if (is_collated(out_nc4, v)) {
                 for (int i=0; i<n_in; ++i) {
-                    fprintf(stdout, "NetCDF copy of %s from %s\n", varname, in_paths[i]);
+                    fprintf(stdout, "\tNetCDF copy of %s from %s\n", varname, in_paths[i]);
                     int in_nc4;
                     NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
                     copy_netcdf(out_nc4, v, in_nc4, v);
@@ -482,6 +473,17 @@ static struct argp argp = {
 };
 
 int main(int argc, char ** argv) {
+    MPI_Init(&argc, &argv);
+
+    int comm_rank;
+    int comm_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+
+    int current_file_idx = 0;
+    MPI_Win current_file_win;
+    MPI_Win_create(&current_file_idx, sizeof(current_file_idx), sizeof(current_file_idx),
+                   MPI_INFO_NULL, MPI_COMM_WORLD, &current_file_win);
 
     int arg_index;
     struct args_t args = {0};
@@ -495,16 +497,50 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "ERROR: No input files specified\n");
         exit(-1);
     }
+    if (comm_size < 2) {
+        fprintf(stderr, "ERROR: Please run with at least 2 MPI processes\n");
+        exit(-1);
+    }
 
     const char * in_path = argv[arg_index];
     const char * out_path = args.output;
 
-    // Copy metadata and un-collated variables
-    init(in_path, out_path);
-    // Copy contiguous variables using NetCDF
-    copy_contiguous(out_path, argv+arg_index, argc-arg_index);
-    // Copy chunked variables using HDF5
-    copy_chunked(out_path, argv+arg_index, argc-arg_index);
+    if (comm_rank == 0) {
+        // Copy metadata and un-collated variables
+        fprintf(stdout, "\nCopying non-collated variables\n");
+        init(in_path, out_path);
+        // Copy contiguous variables using NetCDF
+        fprintf(stdout, "\nCopying contiguous variables\n");
+        copy_contiguous(out_path, argv+arg_index, argc-arg_index);
 
-    return 0;
+        fprintf(stdout, "\nCopying chunked variables\n");
+        double t_start = MPI_Wtime();
+        size_t total_size = run_async_writer(out_path);
+        double t_end = MPI_Wtime();
+        double total_size_gb = total_size / pow(1024,3);
+
+        fprintf(stdout, "\nTotal compressed size %.2f GiB | %.2f GiB / sec\n",
+                total_size_gb, total_size_gb/(t_end - t_start));
+    } else {
+        int increment = 1;
+        int my_file_idx = -1;
+
+        // Atomic post-addition of increment to current_file_idx
+        MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
+        MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
+        MPI_Win_unlock(0, current_file_win);
+
+        while (my_file_idx < argc-arg_index) {
+            // Read chunked variables using HDF5, sending data to the async_writer to be written
+            copy_chunked(argv+arg_index+my_file_idx, 1);
+
+            MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
+            MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
+            MPI_Win_unlock(0, current_file_win);
+        }
+        close_async(0);
+    }
+
+    MPI_Win_free(&current_file_win);
+    return MPI_Finalize();
 }

@@ -1,4 +1,7 @@
-CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
+CC_    ?= mpicc
+CC      = ${CC_}
+#CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
+CFLAGS  = -std=c99 -Wall -Werror -g -O2
 LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
 # # Conda
@@ -7,10 +10,15 @@ LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
 # Use `module load netcdf/4.6.1 hdf5/1.10.2`
 with_module:
-	module purge; module load intel-cc netcdf/4.6.1 hdf5/1.10.2; ${MAKE} test
-
-test: mppnccombine-fast
-	time ./mppnccombine-fast --output /g/data/${PROJECT}/${USER}/test.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.{0000,0001,0005}
-	module purge; module load conda; ./view.py /g/data/${PROJECT}/${USER}/test.nc
+	module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2 scorep/3.1; ${MAKE} all
 
 all: mppnccombine-fast
+
+mppnccombine-fast: async.o error.o
+
+clean:
+	${RM} mppnccombine-fast *.o
+
+scorep: CC_ = scorep mpicc
+scorep: with_module
+	SCOREP_EXPERIMENT_DIRECTORY=scorep mpirun -n 2 ./mppnccombine-fast --output /g/data/w35/saw562/test0.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.0000

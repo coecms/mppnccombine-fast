@@ -4,29 +4,27 @@ An accelerated version of the `mppnccombine` post-processing tool for MOM
 
 Uses HDF5's raw IO functions to speed up collating large datasets - a 0.1
 degree model goes from taking 4 hours to collate a compressed variable with
-mppnccombine, to 25 minutes with mppnccombine-fast
+mppnccombine, to 6 minutes with mppnccombine-fast running with 16 processes
 
 ## Build
 
 `mppnccombine-fast` requires HDF5 version 1.10.2 or above
 
-On Raijin:
+On Raijin (this will automatically load the modules):
 
-    module load netcdf/4.6.1 hdf5/1.10.2 intel-cc openmpi
     make
 
 ## Use
 
 Use like
 
-    mppnccombine-fast --output out.nc input.nc.0000 input.nc.0001 input.nc.0002
+    mpirun -n 2 ./mppnccombine-fast --output out.nc input.nc.0000 input.nc.0001 input.nc.0002
 
 Files will be collated along all axes with a `domain_distribution` attribute
 
-
-TODO: MPI can also be used
-
-    mpirun mppnccombine-fast --output out.nc input.nc.0000 input.nc.0001 input.nc.0002
+At least 2 MPI ranks need to be used (rank 0 writes the output file, other
+ranks read). More can be used - input files will be balanced between the MPI
+ranks.
 
 ## Commentary
 
@@ -57,3 +55,11 @@ the files.
          4. Do a raw copy of the variables from the input to output files
          5. Close the input file
      3. Close the output file
+
+To get a even larger speedup MPI is used to have separate read and write
+processes, since HDF5 IO is a blocking function.
+
+The communication between the read and write processes is handled by the file
+`async.c` - the writer process runs a busy loop waiting for messages from the
+reader processes, then handles messages as they come in. Individual reader
+processes can be sending different variables at the same time.
