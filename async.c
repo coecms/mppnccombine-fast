@@ -20,9 +20,12 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <assert.h>
 #include <mpi.h>
 #include "hdf5.h"
 #include "hdf5_hl.h"
+#include "netcdf.h"
 #include "error.h"
 
 #define TAG_CONTINUE       1
@@ -31,8 +34,45 @@
 #define TAG_CLOSE_VARIABLE 4
 #define TAG_CLOSE          5
 
-// Write a chunk in async mode to the currently open variable
+#define MAX_VARIABLES 100
+
+typedef struct {
+    hid_t file_id;
+    
+    struct {
+        hid_t var_id;
+        char varname[NC_MAX_NAME+1];
+        size_t refcount;
+    } vars[MAX_VARIABLES];
+    
+    int total_vars;
+} async_state_t;
+
+varid_t open_variable_async(
+    const char * varname,
+    size_t len,
+    int async_writer_rank
+    ) {
+    varid_t out;
+
+    MPI_Send(varname, len, MPI_CHAR, async_writer_rank,
+             TAG_OPEN_VARIABLE, MPI_COMM_WORLD);
+    MPI_Recv(&(out.idx), 1, MPI_INT, async_writer_rank,
+             TAG_OPEN_VARIABLE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    return out;
+}
+
+void close_variable_async(
+    varid_t varid,
+    int async_writer_rank
+    ) {
+    MPI_Send(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD);
+}
+
+// Write a chunk in async mode
 void write_chunk_async(
+    varid_t var,
     size_t ndims,
     uint32_t filter_mask,
     hsize_t offset[],
@@ -41,33 +81,39 @@ void write_chunk_async(
     int async_writer_rank,
     MPI_Request * request
     ) {
-    MPI_Request requests[3];
+    MPI_Request requests[4];
+
+    MPI_Isend(&(var.idx), 1, MPI_INT, async_writer_rank,
+              TAG_WRITE_CHUNK, MPI_COMM_WORLD, &(requests[0]));
     
     uint64_t ndims_ = ndims;
     MPI_Isend(&ndims_, 1, MPI_UINT64_T, async_writer_rank,
-              TAG_WRITE_CHUNK, MPI_COMM_WORLD, &(requests[0]));
-    MPI_Isend(&filter_mask, 1, MPI_UINT32_T, async_writer_rank,
               TAG_CONTINUE, MPI_COMM_WORLD, &(requests[1]));
+    MPI_Isend(&filter_mask, 1, MPI_UINT32_T, async_writer_rank,
+              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[2]));
 
     uint64_t offset_[ndims];
     for (int d=0; d<ndims; ++d) {offset_[d] = offset[d];}
     MPI_Isend(offset_, ndims, MPI_UINT64_T, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[2]));
+              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[3]));
 
     MPI_Isend(buffer, data_size, MPI_CHAR, async_writer_rank,
               TAG_CONTINUE, MPI_COMM_WORLD, request);
 }
 
-void receive_write_chunk_async(
-    hid_t var,
+static void receive_write_chunk_async(
+    async_state_t * state,
     MPI_Status status
     ) {
 
+    int idx;
     uint64_t ndims;
     uint32_t filter_mask;
 
-    MPI_Recv(&ndims, 1, MPI_UINT64_T, status.MPI_SOURCE,
+    MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE,
              TAG_WRITE_CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(&ndims, 1, MPI_UINT64_T, status.MPI_SOURCE,
+             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     MPI_Recv(&filter_mask, 1, MPI_UINT64_T, status.MPI_SOURCE,
              TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     
@@ -87,27 +133,13 @@ void receive_write_chunk_async(
     hsize_t offset_[ndims];
     for (int d=0; d<ndims; ++d) {offset_[d] = offset[d];}
 
-    H5ERR(H5DOwrite_chunk(var, H5P_DEFAULT, filter_mask, offset_, buffer_size, buffer));
+    H5ERR(H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
+                          offset_, buffer_size, buffer));
 }
 
 
-// Open a variable in async mode (collective)
-void open_variable_async(
-    const char * varname,
-    size_t len, // Total length including '/0'
-    int async_writer_rank
-    ) {
-
-    MPI_Request r;
-    MPI_Ibarrier(MPI_COMM_WORLD, &r);
-    MPI_Wait(&r, MPI_STATUS_IGNORE);
-    printf("Passed barrier\n");
-    MPI_Send(varname, len, MPI_CHAR, async_writer_rank, TAG_OPEN_VARIABLE, MPI_COMM_WORLD);
-}
-
-void receive_open_variable_async(
-    hid_t file_in,
-    hid_t * var_out,
+static void receive_open_variable_async(
+    async_state_t * state,
     MPI_Status status
     ) {
 
@@ -115,39 +147,64 @@ void receive_open_variable_async(
     MPI_Get_count(&status, MPI_CHAR, &len);
 
     char varname[len];
+    MPI_Recv(varname, len, MPI_CHAR, status.MPI_SOURCE,
+             TAG_OPEN_VARIABLE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    int comm_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-    for (int i=1;i<comm_size;++i) {
-        MPI_Recv(varname, len, MPI_CHAR, i, TAG_OPEN_VARIABLE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    int out = -1;
+    for (int i=0; i<state->total_vars; ++i) {
+        // See if the var exists
+        if (strncmp(varname, state->vars[i].varname, len) == 0) {
+            out = i;
+            break;
+        }
     }
 
-    *var_out = H5Dopen(file_in, varname, H5P_DEFAULT);
-}
+    if (out < 0) {
+        // Add a new var
+        out = (state->total_vars)++;
+        assert(state->total_vars < MAX_VARIABLES);
+        assert(len <= NC_MAX_NAME + 1);
 
-void close_variable_async(
-    int async_writer_rank
-    ) {
-
-    MPI_Request r;
-    MPI_Ibarrier(MPI_COMM_WORLD, &r);
-    MPI_Wait(&r, MPI_STATUS_IGNORE);
-
-    int buffer = 0;
-    MPI_Send(&buffer, 1, MPI_INT, async_writer_rank, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD);
-
-}
-
-void receive_close_variable_async(hid_t var_in, MPI_Status status) {
-    int buffer = 0;
-    int comm_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-    for (int i=1;i<comm_size;++i) {
-        MPI_Recv(&buffer, 1, MPI_INT, i, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        state->vars[out].refcount = 0;
+        strncpy(state->vars[out].varname, varname, len);
     }
-    H5ERR(H5Dclose(var_in));
+
+    if (state->vars[out].refcount == 0) {
+        // Open the var
+        state->vars[out].var_id = 
+            H5Dopen(state->file_id, state->vars[out].varname,
+                    H5P_DEFAULT);
+        H5ERR(state->vars[out].var_id);
+    }
+
+    // Increment the refcount
+    state->vars[out].refcount++;
+
+    // Send the id
+    MPI_Send(&out, 1, MPI_INT, status.MPI_SOURCE, TAG_OPEN_VARIABLE,
+             MPI_COMM_WORLD);
+
 }
 
+static void receive_close_variable_async(
+    async_state_t * state,
+    MPI_Status status) {
+
+    int idx = 0;
+    int comm_size;
+    MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE, TAG_CLOSE_VARIABLE,
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    // Decrement the reference count
+    state->vars[idx].refcount--;
+
+    // If zero has been reached close the variable
+    if (state->vars[idx].refcount == 0) {
+        H5ERR(H5Dclose(state->vars[idx].var_id));
+    }
+}
+
+// Close the file (collective op)
 void close_async(
     int async_writer_rank
     ) {
@@ -160,14 +217,16 @@ void close_async(
     MPI_Send(&buffer, 1, MPI_INT, async_writer_rank, TAG_CLOSE, MPI_COMM_WORLD);
 }
 
-void receive_close_async(hid_t file_in, MPI_Status status) {
+static void receive_close_async(
+    async_state_t * state,
+    MPI_Status status) {
     int buffer = 0;
     int comm_size;
     MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
     for (int i=1;i<comm_size;++i) {
         MPI_Recv(&buffer, 1, MPI_INT, i, TAG_CLOSE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
-    H5ERR(H5Fclose(file_in));
+    H5ERR(H5Fclose(state->file_id));
 }
 
 // Async runner to accept writes
@@ -175,10 +234,12 @@ void run_async_writer(
     const char * filename
     ) {
 
-    hid_t file = H5Fopen(filename, H5F_ACC_RDWR, H5P_DEFAULT);
-    H5ERR(file);
+    async_state_t state;
 
-    hid_t var;
+    state.file_id = H5Fopen(filename, H5F_ACC_RDWR, H5P_DEFAULT);
+    H5ERR(state.file_id);
+
+    state.total_vars = 0;
 
     while (true) {
         // Check for a collective operation
@@ -193,10 +254,22 @@ void run_async_writer(
             MPI_Status status;
             int flag;
 
-            // TAG_WRITE_CHUNK
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_CHUNK, MPI_COMM_WORLD, &flag, &status);
-            if (flag) {
-                receive_write_chunk_async(var, status);
+            // Check for messages more often than barriers
+            for (int j=0; j<10; ++j) {
+                MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
+                if (flag) {
+                    switch(status.MPI_TAG) {
+                        case TAG_WRITE_CHUNK:
+                            receive_write_chunk_async(&state, status);
+                            break;
+                        case TAG_OPEN_VARIABLE:
+                            receive_open_variable_async(&state, status);
+                            break;
+                        case TAG_CLOSE_VARIABLE:
+                            receive_close_variable_async(&state, status);
+                            break;
+                    }
+                }
             }
 
             MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
@@ -206,14 +279,8 @@ void run_async_writer(
         MPI_Status status;
         MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
         switch(status.MPI_TAG) {
-            case TAG_OPEN_VARIABLE:
-                receive_open_variable_async(file, &var, status);
-                break;
-            case TAG_CLOSE_VARIABLE:
-                receive_close_variable_async(var, status);
-                break;
             case TAG_CLOSE:
-                receive_close_async(file, status);
+                receive_close_async(&state, status);
                 return;
                 break;
             default:

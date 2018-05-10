@@ -262,6 +262,7 @@ void init(const char * in_path, const char * out_path) {
 // re-compress the data, however it only works when the source and target
 // chunking and compression settings are identical
 size_t hdf5_raw_copy(
+                  varid_t varid,
                   const size_t out_offset[], // Output offset [ndims]
                   hid_t in_var,              // Input hdf5 variable
                   const size_t in_offset[],  // Input offset [ndims]
@@ -317,7 +318,7 @@ size_t hdf5_raw_copy(
         H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
 
         MPI_Request request;
-        write_chunk_async(ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
+        write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
         MPI_Wait(&request, MPI_STATUS_IGNORE);
 
         total_copied_size += block_size;
@@ -329,7 +330,7 @@ size_t hdf5_raw_copy(
 }
 
 // Copy chunked variables from the file at in_path to HDF5 variable out_var
-size_t copy_chunked_variable(const char * in_path, const char * varname) {
+size_t copy_chunked_variable(varid_t var_id, const char * in_path, const char * varname) {
     // Open in NetCDF mode to gather metadata
     int in_nc4;
     NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
@@ -356,7 +357,7 @@ size_t copy_chunked_variable(const char * in_path, const char * varname) {
     hid_t in_var = H5Dopen(in_file, varname, H5P_DEFAULT);
     H5ERR(in_var);
 
-    size_t total_copied_size = hdf5_raw_copy(out_offset, in_var, in_offset, local_shape, ndims);
+    size_t total_copied_size = hdf5_raw_copy(var_id, out_offset, in_var, in_offset, local_shape, ndims);
 
     H5ERR(H5Dclose(in_var));
     H5ERR(H5Fclose(in_file));
@@ -395,11 +396,11 @@ void copy_chunked(char ** in_paths, int n_in) {
 
         // Copy chunked variable from all input files
         if (storage == NC_CHUNKED) {
-            open_variable_async(varname, NC_MAX_NAME+1, 0);
+            varid_t var_id = open_variable_async(varname, NC_MAX_NAME+1, 0);
             for (int i=0; i<n_in; ++i) {
-                total_copied_size += copy_chunked_variable(in_paths[i], varname);
+                total_copied_size += copy_chunked_variable(var_id, in_paths[i], varname);
             }
-            close_variable_async(0);
+            close_variable_async(var_id, 0);
         }
     }
 
@@ -760,7 +761,7 @@ int main(int argc, char ** argv) {
 
         // Copy chunked variables using HDF5
         copy_chunked(argv+arg_index+comm_rank-1, 1);
-        copy_chunked(argv+arg_index+comm_rank-1+12, 1);
+        //copy_chunked(argv+arg_index+comm_rank-1+12, 1);
         close_async(0);
     }
 

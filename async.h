@@ -27,8 +27,13 @@ extern "C" {
 #include "hdf5.h"
 #include "mpi.h"
 
-// Write a chunk in async mode to the currently open variable
+typedef struct {
+    int idx; 
+} varid_t;
+
+// Write a chunk in async mode to the variable `var` (independant)
 void write_chunk_async(
+    varid_t var,
     size_t ndims,
     uint32_t filter_mask,
     hsize_t offset[],
@@ -38,15 +43,16 @@ void write_chunk_async(
     MPI_Request * request
     );
 
-// Open a variable in the async writer (collective)
-void open_variable_async(
+// Open a variable in the async writer (independant)
+varid_t open_variable_async(
     const char * varname,
     size_t len, // Total length including '/0'
     int async_writer_rank
     );
 
-// Close a variable in the async writer (collective)
+// Close a variable in the async writer (independant)
 void close_variable_async(
+    varid_t varid,
     int async_writer_rank
     );
 

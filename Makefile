@@ -1,4 +1,4 @@
-CC      = mpicc
+CC      = scorep mpicc
 CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
 LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
@@ -18,4 +18,4 @@ clean:
 	${RM} mppnccombine-fast *.o
 
 scorep: with_module
-	SCOREP_EXPERIMENT_DIRECTORY=scorep mpirun  -n 3 ./mppnccombine-fast --output /g/data/w35/saw562/test0.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.0000
+	SCOREP_EXPERIMENT_DIRECTORY=scorep mpirun -n 2 ./mppnccombine-fast --output /g/data/w35/saw562/test0.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.0000
