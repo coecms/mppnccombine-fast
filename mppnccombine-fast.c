@@ -760,6 +760,7 @@ int main(int argc, char ** argv) {
 
         // Copy chunked variables using HDF5
         copy_chunked(argv+arg_index+comm_rank-1, 1);
+        copy_chunked(argv+arg_index+comm_rank-1+12, 1);
         close_async(0);
     }
 

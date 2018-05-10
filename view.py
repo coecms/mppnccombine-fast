@@ -21,7 +21,7 @@ import xarray
 import matplotlib.pyplot as plt
 
 
-d = xarray.open_dataset('/g/data/w35/saw562/test.nc', chunks={'time': 1, 'st_ocean': 1})
+d = xarray.open_dataset('/g/data/w35/saw562/test0.nc', chunks={'time': 1, 'st_ocean': 1})
 temp = d.isel(time=0, st_ocean=0).temp
 #d.isel(time=0, st_ocean=0).temp.plot.imshow()
 temp.plot.imshow()
