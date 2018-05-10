@@ -27,30 +27,11 @@
 #include <math.h>
 #include <mpi.h>
 
+#include "error.h"
+#include "async.h"
+
 #define TAG_DECOMP 1
 #define TAG_CHUNK 2
-
-// NetCDF error handler
-#define NCERR(x) handle_nc_error(x, __FILE__, __LINE__)
-void handle_nc_error(int err, const char * file, int line) {
-    if (err != 0) {
-        const char * message = nc_strerror(err);
-
-        fprintf(stderr, "ERROR %s:%d %d %s\n", file, line, err, message);
-        exit(-1);
-    }
-}
-
-
-// HDF5 error handler
-#define H5ERR(x) handle_h5_error(x, __FILE__, __LINE__)
-void handle_h5_error(int err, const char * file, int line) {
-    if (err < 0) {
-        fprintf(stderr, "ERROR %s:%d\n", file, line);
-        H5Eprint1(stderr);
-        exit(-1);
-    }
-}
 
 // Get the decomposition attribute from a variable
 // If this is not a decomposed variable, decompositon[] is unchanged and returns false,
@@ -281,7 +262,6 @@ void init(const char * in_path, const char * out_path) {
 // re-compress the data, however it only works when the source and target
 // chunking and compression settings are identical
 size_t hdf5_raw_copy(
-                  hid_t out_var,             // Output hdf5 variable
                   const size_t out_offset[], // Output offset [ndims]
                   hid_t in_var,              // Input hdf5 variable
                   const size_t in_offset[],  // Input offset [ndims]
@@ -335,7 +315,10 @@ size_t hdf5_raw_copy(
         // Copy this chunk's data
         uint32_t filter_mask = 0;
         H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
-        H5ERR(H5DOwrite_chunk(out_var, H5P_DEFAULT, filter_mask, copy_out_offset, block_size, buffer));
+
+        MPI_Request request;
+        write_chunk_async(ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
 
         total_copied_size += block_size;
     }
@@ -346,7 +329,7 @@ size_t hdf5_raw_copy(
 }
 
 // Copy chunked variables from the file at in_path to HDF5 variable out_var
-size_t copy_chunked_variable(const char * in_path, hid_t out_var, const char * varname) {
+size_t copy_chunked_variable(const char * in_path, const char * varname) {
     // Open in NetCDF mode to gather metadata
     int in_nc4;
     NCERR(nc_open(in_path, NC_NOWRITE, &in_nc4));
@@ -373,9 +356,8 @@ size_t copy_chunked_variable(const char * in_path, hid_t out_var, const char * v
     hid_t in_var = H5Dopen(in_file, varname, H5P_DEFAULT);
     H5ERR(in_var);
 
-    size_t total_copied_size = hdf5_raw_copy(out_var, out_offset, in_var, in_offset, local_shape, ndims);
+    size_t total_copied_size = hdf5_raw_copy(out_offset, in_var, in_offset, local_shape, ndims);
 
-    H5ERR(H5Fflush(out_var, H5F_SCOPE_GLOBAL));
     H5ERR(H5Dclose(in_var));
     H5ERR(H5Fclose(in_file));
 
@@ -385,7 +367,7 @@ size_t copy_chunked_variable(const char * in_path, hid_t out_var, const char * v
 // Copy chunked variables - these may be compressed, so we'll use HDF5. Since
 // we can't have the same file open in both HDF5 and NetCDF4 modes we need to
 // do a bit of shuffling to get all the metadata.
-void copy_chunked(const char * out_path, char ** in_paths, int n_in) {
+void copy_chunked(char ** in_paths, int n_in) {
     size_t total_copied_size = 0;
     double t_start = MPI_Wtime();
 
@@ -397,10 +379,6 @@ void copy_chunked(const char * out_path, char ** in_paths, int n_in) {
     NCERR(nc_close(in_nc4));
 
     fprintf(stdout, "\nCopying chunked variables\n");
-
-    // Open the output file in HDF5 mode
-    hid_t out_file = H5Fopen(out_path, H5F_ACC_RDWR, H5P_DEFAULT);
-    H5ERR(out_file);
 
     // Loop over each variable
     for (int v=0; v<nvars; ++v) {
@@ -417,15 +395,13 @@ void copy_chunked(const char * out_path, char ** in_paths, int n_in) {
 
         // Copy chunked variable from all input files
         if (storage == NC_CHUNKED) {
-            hid_t out_var = H5Dopen(out_file, varname, H5P_DEFAULT);
-            H5ERR(out_var);
+            open_variable_async(varname, NC_MAX_NAME+1, 0);
             for (int i=0; i<n_in; ++i) {
-                total_copied_size += copy_chunked_variable(in_paths[i], out_var, varname);
+                total_copied_size += copy_chunked_variable(in_paths[i], varname);
             }
-            H5ERR(H5Dclose(out_var));
+            close_variable_async(0);
         }
     }
-    H5ERR(H5Fclose(out_file));
 
     double t_end = MPI_Wtime();
     double total_size_gb = total_copied_size / pow(1024,3);
@@ -765,7 +741,7 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "ERROR: No input files specified\n");
         exit(-1);
     }
-    if (comm_size != 2) {
+    if (comm_size < 2) {
         fprintf(stderr, "ERROR: Please run with `mpirun -n 2`\n");
         exit(-1);
     }
@@ -778,10 +754,14 @@ int main(int argc, char ** argv) {
         init(in_path, out_path);
         // Copy contiguous variables using NetCDF
         copy_contiguous(out_path, argv+arg_index, argc-arg_index);
-    }
 
-    // Copy chunked variables using HDF5
-    copy_chunked_mpi(out_path, argv+arg_index, argc-arg_index, comm_rank);
+        run_async_writer(out_path);
+    } else {
+
+        // Copy chunked variables using HDF5
+        copy_chunked(argv+arg_index+comm_rank-1, 1);
+        close_async(0);
+    }
 
     return MPI_Finalize();
 }
