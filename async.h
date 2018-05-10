@@ -62,7 +62,8 @@ void close_async(
     );
 
 // Async runner to accept writes
-void run_async_writer(
+// Returns total size written
+size_t run_async_writer(
     const char * filename
     );
 

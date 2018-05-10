@@ -19,10 +19,10 @@ limitations under the License.
 from __future__ import print_function
 import xarray
 import matplotlib.pyplot as plt
+import sys
 
-
-d = xarray.open_dataset('/g/data/w35/saw562/test0.nc', chunks={'time': 1, 'st_ocean': 1})
-temp = d.isel(time=0, st_ocean=0).temp
+d = xarray.open_dataset(sys.argv[1], chunks={'time': 1, 'st_ocean': 1})
+temp = d.isel(time=-1, st_ocean=0).temp
 #d.isel(time=0, st_ocean=0).temp.plot.imshow()
 temp.plot.imshow()
 #plt.imshow(temp.values)

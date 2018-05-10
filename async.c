@@ -101,7 +101,7 @@ void write_chunk_async(
               TAG_CONTINUE, MPI_COMM_WORLD, request);
 }
 
-static void receive_write_chunk_async(
+static size_t receive_write_chunk_async(
     async_state_t * state,
     MPI_Status status
     ) {
@@ -135,6 +135,8 @@ static void receive_write_chunk_async(
 
     H5ERR(H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
                           offset_, buffer_size, buffer));
+
+    return buffer_size;
 }
 
 
@@ -230,9 +232,10 @@ static void receive_close_async(
 }
 
 // Async runner to accept writes
-void run_async_writer(
+size_t run_async_writer(
     const char * filename
     ) {
+    size_t total_size = 0;
 
     async_state_t state;
 
@@ -260,7 +263,7 @@ void run_async_writer(
                 if (flag) {
                     switch(status.MPI_TAG) {
                         case TAG_WRITE_CHUNK:
-                            receive_write_chunk_async(&state, status);
+                            total_size += receive_write_chunk_async(&state, status);
                             break;
                         case TAG_OPEN_VARIABLE:
                             receive_open_variable_async(&state, status);
@@ -281,7 +284,7 @@ void run_async_writer(
         switch(status.MPI_TAG) {
             case TAG_CLOSE:
                 receive_close_async(&state, status);
-                return;
+                return total_size;
                 break;
             default:
                 fprintf(stderr, "Unknown TAG %d received by run_async_writer\n", status.MPI_TAG);

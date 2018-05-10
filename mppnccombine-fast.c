@@ -118,6 +118,7 @@ bool is_collated(int ncid, int varid) {
 
 // Print diagnostic information about this file's collation
 void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
+    /*
     fprintf(stdout, "\tStart index ");
     for (int d=0; d<ndims; ++d) {
         fprintf(stdout, "% 6zu\t", out_offset[d]);
@@ -128,6 +129,7 @@ void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
         fprintf(stdout, "% 6zu\t", local_size[d]);
     }
     fprintf(stdout, "\n");
+    */
 }
 
 // Copy a (possibly collated) field in NetCDF mode
@@ -379,8 +381,6 @@ void copy_chunked(char ** in_paths, int n_in) {
     NCERR(nc_inq_nvars(in_nc4, &nvars));
     NCERR(nc_close(in_nc4));
 
-    fprintf(stdout, "\nCopying chunked variables\n");
-
     // Loop over each variable
     for (int v=0; v<nvars; ++v) {
         int in_nc4;
@@ -407,13 +407,12 @@ void copy_chunked(char ** in_paths, int n_in) {
     double t_end = MPI_Wtime();
     double total_size_gb = total_copied_size / pow(1024,3);
 
-    fprintf(stdout, "Total compressed size %.2f GiB | %.2f GiB / sec\n", total_size_gb, total_size_gb/(t_end - t_start));
+    // fprintf(stdout, "Total compressed size %.2f GiB | %.2f GiB / sec\n", total_size_gb, total_size_gb/(t_end - t_start));
 }
 
 // Copy contiguous variables - no chunking means no compression, so we can just
 // use NetCDF
 void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
-    fprintf(stdout, "\nCopying contiguous variables\n");
 
     int out_nc4;
     NCERR(nc_open(out_path, NC_WRITE, &out_nc4));
@@ -618,7 +617,6 @@ void copy_chunked_mpi_consumer(const char * out_path, size_t n_in) {
     NCERR(nc_inq_nvars(out_nc4, &nvars));
     NCERR(nc_close(out_nc4));
 
-    fprintf(stdout, "\nCopying chunked variables\n");
 
     char varname[NC_MAX_NAME+1];
 
@@ -730,6 +728,11 @@ int main(int argc, char ** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
+    int current_file_idx = 0;
+    MPI_Win current_file_win;
+    MPI_Win_create(&current_file_idx, sizeof(current_file_idx), sizeof(current_file_idx),
+                   MPI_INFO_NULL, MPI_COMM_WORLD, &current_file_win);
+
     int arg_index;
     struct args_t args = {0};
 
@@ -743,7 +746,7 @@ int main(int argc, char ** argv) {
         exit(-1);
     }
     if (comm_size < 2) {
-        fprintf(stderr, "ERROR: Please run with `mpirun -n 2`\n");
+        fprintf(stderr, "ERROR: Please run with at least 2 MPI processes\n");
         exit(-1);
     }
 
@@ -752,18 +755,40 @@ int main(int argc, char ** argv) {
 
     if (comm_rank == 0) {
         // Copy metadata and un-collated variables
+        fprintf(stdout, "\nCopying non-collated variables\n");
         init(in_path, out_path);
         // Copy contiguous variables using NetCDF
+        fprintf(stdout, "\nCopying contiguous variables\n");
         copy_contiguous(out_path, argv+arg_index, argc-arg_index);
 
-        run_async_writer(out_path);
-    } else {
+        fprintf(stdout, "\nCopying chunked variables\n");
+        double t_start = MPI_Wtime();
+        size_t total_size = run_async_writer(out_path);
+        double t_end = MPI_Wtime();
+        double total_size_gb = total_size / pow(1024,3);
 
-        // Copy chunked variables using HDF5
-        copy_chunked(argv+arg_index+comm_rank-1, 1);
-        //copy_chunked(argv+arg_index+comm_rank-1+12, 1);
+        fprintf(stdout, "\nTotal compressed size %.2f GiB | %.2f GiB / sec\n",
+                total_size_gb, total_size_gb/(t_end - t_start));
+    } else {
+        int increment = 1;
+        int my_file_idx = -1;
+
+        // Atomic post-addition of increment to current_file_idx
+        MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
+        MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
+        MPI_Win_unlock(0, current_file_win);
+
+        while (my_file_idx < argc-arg_index) {
+            // Read chunked variables using HDF5, sending data to the async_writer to be written
+            copy_chunked(argv+arg_index+my_file_idx, 1);
+
+            MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
+            MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
+            MPI_Win_unlock(0, current_file_win);
+        }
         close_async(0);
     }
 
+    MPI_Win_free(&current_file_win);
     return MPI_Finalize();
 }
