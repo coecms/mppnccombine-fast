@@ -33,6 +33,22 @@
 #define TAG_DECOMP 1
 #define TAG_CHUNK 2
 
+
+// Returns true if dimension dimid in file ncid is unlimited
+bool is_unlimited(int ncid, int dimid) {
+    int nudims;
+    NCERR(nc_inq_unlimdims(ncid, &nudims, NULL));
+    int udims[nudims];
+    NCERR(nc_inq_unlimdims(ncid, NULL, udims));
+
+    for (int i=0; i<nudims; ++i) {
+        if (udims[i] == dimid) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Get the decomposition attribute from a variable
 // If this is not a decomposed variable, decompositon[] is unchanged and returns false,
 // otherwise returns true
@@ -211,7 +227,11 @@ void init(const char * in_path, const char * out_path) {
         }
 
         // Create the out dim
-        NCERR(nc_def_dim(out_file, name, len, &dimid));
+        if (is_unlimited(in_file, d)) {
+            NCERR(nc_def_dim(out_file, name, NC_UNLIMITED, &dimid));
+        } else {
+            NCERR(nc_def_dim(out_file, name, len, &dimid));
+        }
         assert(dimid == d);
     }
 
