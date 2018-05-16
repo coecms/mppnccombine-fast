@@ -186,9 +186,15 @@ void init(const char * in_path, const char * out_path) {
     NCERR(nc_open(in_path, NC_NOWRITE, &in_file));
     NCERR(nc_create(out_path, NC_NETCDF4 | NC_CLOBBER, &out_file));
 
-    // Copy dimensions
     int ndims;
-    NCERR(nc_inq_ndims(in_file, &ndims));
+    int nvars;
+    int natts;
+    NCERR(nc_inq(in_file, &ndims, &nvars, &natts, NULL));
+    
+    // Copy global attributes
+    copy_attrs(out_file, NC_GLOBAL, in_file, NC_GLOBAL, natts);
+
+    // Copy dimensions
     for (int d=0; d<ndims;++d) {
         char name[NC_MAX_NAME+1];
         size_t len;
@@ -210,8 +216,6 @@ void init(const char * in_path, const char * out_path) {
     }
 
     // Copy variables
-    int nvars;
-    NCERR(nc_inq_nvars(in_file, &nvars));
     for (int v=0; v<nvars; ++v) {
         char name[NC_MAX_NAME+1];
         nc_type type;
