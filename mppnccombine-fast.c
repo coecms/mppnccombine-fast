@@ -465,6 +465,53 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
     NCERR(nc_close(out_nc4));
 }
 
+void check_chunking(char ** in_paths, int n_in) {
+    int ncid0, nvars;
+    NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
+    NCERR(nc_inq_nvars(ncid0, &nvars));
+    
+    for (int v=0; v<nvars; ++v) {
+        int ndims;
+        NCERR(nc_inq_varndims(ncid0, v, &ndims));
+
+        int storage0;
+        size_t chunk0[ndims];
+        int shuffle0;
+        int deflate0;
+        int deflate_level0;
+        NCERR(nc_inq_var_chunking(ncid0, v, &storage0, chunk0));
+        NCERR(nc_inq_var_deflate(ncid0, v, &shuffle0, &deflate0, &deflate_level0));
+
+        for (int i=1; i<n_in; ++i) {
+            int ncid;
+            NCERR(nc_open(in_paths[i], NC_NOWRITE, &ncid));
+            int storage;
+            size_t chunk[ndims];
+            int shuffle;
+            int deflate;
+            int deflate_level;
+            NCERR(nc_inq_var_chunking(ncid, v, &storage, chunk));
+            NCERR(nc_inq_var_deflate(ncid, v, &shuffle, &deflate, &deflate_level));
+
+            assert(storage == storage0);
+            assert(shuffle == shuffle0);
+            assert(deflate == deflate0);
+            assert(deflate_level == deflate_level0);
+
+            if (storage == NC_CHUNKED) {
+                for (int d=0; d<ndims; ++d){
+                    assert(chunk[d] == chunk0[d]);
+                }
+            }
+
+            NCERR(nc_close(ncid));
+        }
+
+
+    }
+    NCERR(nc_close(ncid0));
+}
+
 struct args_t {
     const char * output;
 };
@@ -530,6 +577,8 @@ int main(int argc, char ** argv) {
     const char * out_path = args.output;
 
     if (comm_rank == 0) {
+        check_chunking(argv+arg_index, argc-arg_index);
+
         // Copy metadata and un-collated variables
         fprintf(stdout, "\nCopying non-collated variables\n");
         init(in_path, out_path);
