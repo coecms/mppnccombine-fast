@@ -227,11 +227,7 @@ void init(const char * in_path, const char * out_path) {
         }
 
         // Create the out dim
-        if (is_unlimited(in_file, d)) {
-            NCERR(nc_def_dim(out_file, name, NC_UNLIMITED, &dimid));
-        } else {
-            NCERR(nc_def_dim(out_file, name, len, &dimid));
-        }
+        NCERR(nc_def_dim(out_file, name, len, &dimid));
         assert(dimid == d);
     }
 
@@ -251,20 +247,22 @@ void init(const char * in_path, const char * out_path) {
         NCERR(nc_def_var(out_file, name, type, ndims, dimids, &out_v));
 
         // Chunking needs to be identical in 'in' and 'out' files
-        int storage;
-        size_t chunk[ndims];
-        NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
-        if (storage == NC_CHUNKED) {
-            NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
-        }
+        if (is_collated(in_file, v)) {
+            int storage;
+            size_t chunk[ndims];
+            NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
+            if (storage == NC_CHUNKED) {
+                NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
+            }
 
-        // Compression needs to be identical in 'in' and 'out' files
-        int shuffle;
-        int deflate;
-        int deflate_level;
-        NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
-        if (shuffle || deflate) {
-            NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
+            // Compression needs to be identical in 'in' and 'out' files
+            int shuffle;
+            int deflate;
+            int deflate_level;
+            NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
+            if (shuffle || deflate) {
+                NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
+            }
         }
 
         // Copy attributes
