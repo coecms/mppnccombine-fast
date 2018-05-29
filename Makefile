@@ -1,5 +1,4 @@
-CC_    ?= mpicc
-CC      = ${CC_}
+CC      = module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2; mpicc
 #CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
 CFLAGS  = -std=c99 -Wall -Werror -g -O2
 LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
@@ -8,11 +7,11 @@ LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 # CFLAGS += -I${CONDA_PREFIX}/include
 # LDFLAGS = -L${CONDA_PREFIX}/lib -Wl,-rpath=${CONDA_PREFIX}/lib
 
-# Use `module load netcdf/4.6.1 hdf5/1.10.2`
-with_module:
-	module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2 scorep/3.1; ${MAKE} all
-
 all: mppnccombine-fast
+
+test: mppnccombine-fast
+	module purge; module load conda openmpi/3.0.1; pytest test.py
+
 
 mppnccombine-fast: async.o error.o
 

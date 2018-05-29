@@ -21,6 +21,7 @@ import xarray
 import subprocess
 import numpy as np
 import netCDF4
+import pytest
 
 # Run the collation program
 def run_collate(inputs, output, np=2):
@@ -95,6 +96,7 @@ def test_split_on_boundary(tmpdir):
     assert (c.a.data == d.a.data).all()
     assert (c.x.data == d.x.data).all()
 
+@pytest.mark.xfail
 def test_split_off_boundary(tmpdir):
     d = xarray.Dataset(
             {
