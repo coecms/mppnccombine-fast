@@ -33,6 +33,8 @@
 #define TAG_OPEN_VARIABLE  3
 #define TAG_CLOSE_VARIABLE 4
 #define TAG_CLOSE          5
+#define TAG_WRITE_FILTER   10
+#define TAG_WRITE_DIRECT   11
 
 #define MAX_VARIABLES 100
 
@@ -69,6 +71,139 @@ void close_variable_async(
     ) {
     MPI_Send(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD);
 }
+
+// Change a NetCDF type to MPI
+MPI_Datatype type_nc_to_mpi(nc_type type) {
+    MPI_Datatype type_mpi;
+    switch (type) {
+        case (NC_INT):
+            return MPI_INT;
+        case (NC_FLOAT):
+            return MPI_FLOAT;
+        case (NC_DOUBLE):
+            return MPI_DOUBLE;
+        default:
+            fprintf(stderr, "Unknown NetCDF type %d\n", type);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    return MPI_INT;
+}
+// Change a NetCDF type to HDF5
+hid_t type_nc_to_h5(nc_type type) {
+    MPI_Datatype type_mpi;
+    switch (type) {
+        case (NC_INT):
+            return H5T_NATIVE_INT;
+        case (NC_FLOAT):
+            return H5T_NATIVE_FLOAT;
+        case (NC_DOUBLE):
+            return H5T_NATIVE_DOUBLE;
+        default:
+            fprintf(stderr, "Unknown NetCDF type %d\n", type);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    return H5T_NATIVE_INT;
+}
+
+// Write data to the file, using the dataset filters
+void write_filtered_async(
+    varid_t var,
+    size_t ndims,
+    size_t chunk_offset[],
+    size_t chunk_shape[],
+    void * buffer,
+    nc_type type,
+    int async_writer_rank,
+    MPI_Request * request) {
+    
+    MPI_Request requests[4];
+
+    // Send the variable ID we want to write to
+    MPI_Isend(&(var.idx), 1, MPI_INT, async_writer_rank,
+              TAG_WRITE_FILTER, MPI_COMM_WORLD, &(requests[0]));
+
+    // Pack chunk information into a vector
+    int chunk_data_count = 2 * ndims;
+    uint64_t chunk_data[chunk_data_count];
+    size_t buffer_count = 1;
+    
+    for (int d=0;d<ndims;++d) {
+        chunk_data[d]       = chunk_offset[d];
+        chunk_data[ndims+d] = chunk_shape[d];
+
+        buffer_count *= chunk_shape[d];
+    }
+    MPI_Isend(chunk_data, chunk_data_count, MPI_UINT64_T, async_writer_rank,
+              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[1]));
+
+    MPI_Datatype type_mpi = type_nc_to_mpi(type);
+
+    // Send the buffer - reciever can get the count and type
+    MPI_Isend(buffer, buffer_count, type_mpi, async_writer_rank,
+              type, MPI_COMM_WORLD, request);
+}
+
+void receive_write_filtered_async(
+    async_state_t * state,
+    MPI_Status status
+    ) {
+
+    int idx;
+
+    // Get the messages - target variable id, chunk info, data
+
+    MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE,
+             TAG_WRITE_CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    MPI_Status probe;
+    MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &probe);
+
+    int chunk_data_count;
+    MPI_Get_count(&probe, MPI_UINT64_T, &chunk_data_count);
+
+    uint64_t chunk_data[chunk_data_count];
+    MPI_Recv(chunk_data, chunk_data_count, MPI_UINT64_T, status.MPI_SOURCE,
+             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    MPI_Probe(status.MPI_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &probe);
+    nc_type type = probe.MPI_TAG;
+    MPI_Datatype type_mpi = type_nc_to_mpi(type);
+
+    int buffer_count;
+    MPI_Get_count(&probe, type_mpi, &buffer_count);
+
+    char buffer[buffer_count * sizeof(double)];
+    MPI_Recv(buffer, buffer_count, type_mpi, status.MPI_SOURCE,
+             type, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    // Unpack chunk info
+    int ndims = chunk_data_count / 2;
+    hsize_t offset[ndims];
+    hsize_t shape[ndims];
+    for (int d=0;d<ndims;++d) {
+        offset[d] = chunk_data[d];
+        shape[d]  = chunk_data[ndims+d];
+    }
+
+    // Create selections and write out the data
+    hid_t mem_space = H5Screate_simple(ndims, shape, NULL);
+    H5ERR(mem_space);
+
+    hid_t data_space = H5Dget_space(state->vars[idx].var_id);
+    H5ERR(data_space);
+    H5ERR(H5Sselect_hyperslab(data_space, H5S_SELECT_SET,
+                              offset, NULL, shape, NULL));
+
+    hid_t type_h5 = type_nc_to_h5(type);
+    H5ERR(H5Dwrite(state->vars[idx].var_id, type_h5,
+                   mem_space, data_space, H5P_DEFAULT, buffer));
+
+    H5ERR(H5Sclose(mem_space));
+    H5ERR(H5Sclose(data_space));
+}
+
 
 // Write a chunk in async mode
 void write_chunk_async(
@@ -270,6 +405,9 @@ size_t run_async_writer(
                             break;
                         case TAG_CLOSE_VARIABLE:
                             receive_close_variable_async(&state, status);
+                            break;
+                        case TAG_WRITE_FILTER:
+                            receive_write_filtered_async(&state, status);
                             break;
                     }
                 }

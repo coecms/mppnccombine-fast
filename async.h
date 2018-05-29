@@ -26,10 +26,22 @@ extern "C" {
 #include <stdint.h>
 #include "hdf5.h"
 #include "mpi.h"
+#include "netcdf.h"
 
 typedef struct {
     int idx; 
 } varid_t;
+
+// Write data to the file, using the dataset filters
+void write_filtered_async(
+    varid_t var,
+    size_t ndims,
+    size_t chunk_offset[],
+    size_t chunk_shape[],
+    void * buffer,
+    nc_type type,
+    int async_writer_rank,
+    MPI_Request * request);
 
 // Write a chunk in async mode to the variable `var` (independant)
 void write_chunk_async(

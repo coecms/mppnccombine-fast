@@ -57,7 +57,7 @@ bool get_collated_dim_decomp(int ncid, const char * varname, int decomposition[4
     int err;
     NCERR(nc_inq_varid(ncid, varname, &varid));
 
-    err = nc_get_att(ncid, varid, "domain_decomposition", decomposition);
+    err = nc_get_att_int(ncid, varid, "domain_decomposition", decomposition);
     if (err == NC_ENOTATT) {
         return false;
     }

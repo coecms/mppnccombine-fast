@@ -16,21 +16,11 @@
  * limitations under the License.
  */
 
-#ifndef ERROR_H
-#define ERROR_H
+#ifndef READERS_H
+#define READERS_H
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// NetCDF error handler
-#define NCERR(x) handle_nc_error(x, __FILE__, __LINE__)
-void handle_nc_error(int err, const char * file, int line);
-
-#define H5ERR(x) handle_h5_error(x, __FILE__, __LINE__)
-void handle_h5_error(int err, const char * file, int line);
-
-#define CERR(x) handle_c_error(x, __FILE__, __LINE__)
-void handle_c_error(int err, const char * file, int line);
 
 #ifdef __cplusplus
 }
