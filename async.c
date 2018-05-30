@@ -29,12 +29,14 @@
 #include "error.h"
 
 #define TAG_CONTINUE       1
-#define TAG_WRITE_CHUNK    2
-#define TAG_OPEN_VARIABLE  3
-#define TAG_CLOSE_VARIABLE 4
 #define TAG_CLOSE          5
-#define TAG_WRITE_FILTER   10
-#define TAG_WRITE_DIRECT   11
+
+#define TAG_WRITE_CHUNK    10
+#define TAG_WRITE_FILTER   11
+
+#define TAG_OPEN_VARIABLE  20
+#define TAG_CLOSE_VARIABLE 21
+#define TAG_VAR_INFO       22
 
 #define MAX_VARIABLES 100
 
@@ -107,13 +109,56 @@ hid_t type_nc_to_h5(nc_type type) {
     return H5T_NATIVE_INT;
 }
 
-// Write data to the file, using the dataset filters
-void write_filtered_async(
+
+// Get info about a variable
+void variable_info_async(
     varid_t var,
     size_t ndims,
-    size_t chunk_offset[],
-    size_t chunk_shape[],
-    void * buffer,
+    uint64_t chunk[],
+    int async_writer_rank
+    ) {
+
+    // Send the variable ID we want to write to
+    MPI_Send(&(var.idx), 1, MPI_INT, async_writer_rank,
+             TAG_VAR_INFO, MPI_COMM_WORLD);
+
+    MPI_Recv(chunk, ndims, MPI_UINT64_T, async_writer_rank,
+             TAG_VAR_INFO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+}
+
+void receive_variable_info_async(
+    async_state_t * state,
+    MPI_Status status
+    ) {
+
+    int idx;
+    MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG,
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+
+    hid_t space = H5Dget_space(state->vars[idx].var_id);
+    H5ERR(space);
+    int ndims = H5Sget_simple_extent_ndims(space);
+    H5ERR(H5Sclose(space));
+
+    unsigned long long chunk[ndims];
+    hid_t plist = H5Dget_create_plist(state->vars[idx].var_id);
+    H5ERR(plist);
+    H5ERR(H5Pget_chunk(plist, ndims, chunk));
+    H5ERR(H5Pclose(plist));
+
+    MPI_Send(chunk, ndims, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
+             status.MPI_TAG, MPI_COMM_WORLD);
+}
+
+
+// Write data to the file, using the dataset filters
+void write_uncompressed_async(
+    varid_t var,
+    size_t ndims,
+    const size_t chunk_offset[],
+    const size_t chunk_shape[],
+    const void * buffer,
     nc_type type,
     int async_writer_rank,
     MPI_Request * request) {
@@ -145,7 +190,7 @@ void write_filtered_async(
               type, MPI_COMM_WORLD, request);
 }
 
-void receive_write_filtered_async(
+static void receive_write_uncompressed_async(
     async_state_t * state,
     MPI_Status status
     ) {
@@ -155,7 +200,7 @@ void receive_write_filtered_async(
     // Get the messages - target variable id, chunk info, data
 
     MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE,
-             TAG_WRITE_CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_FILTER, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     MPI_Status probe;
     MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &probe);
@@ -407,7 +452,10 @@ size_t run_async_writer(
                             receive_close_variable_async(&state, status);
                             break;
                         case TAG_WRITE_FILTER:
-                            receive_write_filtered_async(&state, status);
+                            receive_write_uncompressed_async(&state, status);
+                            break;
+                        case TAG_VAR_INFO:
+                            receive_variable_info_async(&state, status);
                             break;
                     }
                 }

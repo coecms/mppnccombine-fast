@@ -1,6 +1,6 @@
 CC      = module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2; mpicc
 #CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
-CFLAGS  = -std=c99 -Wall -Werror -g -O2
+CFLAGS  = -std=c99 -Wall -Werror -g -O0 -check-pointers=rw
 LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
 # # Conda
@@ -13,7 +13,7 @@ test: mppnccombine-fast
 	module purge; module load conda openmpi/3.0.1; pytest test.py
 
 
-mppnccombine-fast: async.o error.o
+mppnccombine-fast: async.o error.o readers.o
 
 clean:
 	${RM} mppnccombine-fast *.o

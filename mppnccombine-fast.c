@@ -29,6 +29,7 @@
 
 #include "error.h"
 #include "async.h"
+#include "readers.h"
 
 #define TAG_DECOMP 1
 #define TAG_CHUNK 2
@@ -49,88 +50,6 @@ bool is_unlimited(int ncid, int dimid) {
     return false;
 }
 
-// Get the decomposition attribute from a variable
-// If this is not a decomposed variable, decompositon[] is unchanged and returns false,
-// otherwise returns true
-bool get_collated_dim_decomp(int ncid, const char * varname, int decomposition[4]) {
-    int varid;
-    int err;
-    NCERR(nc_inq_varid(ncid, varname, &varid));
-
-    err = nc_get_att_int(ncid, varid, "domain_decomposition", decomposition);
-    if (err == NC_ENOTATT) {
-        return false;
-    }
-    NCERR(err);
-    return true;
-}
-
-// Get the total length of a collated variable
-void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
-    int decomposition[4];
-    get_collated_dim_decomp(ncid, varname, decomposition);
-    *len = decomposition[1];
-}
-
-// Get collation info from a variable
-// out_offset[ndims] - The offset in the collated array of this variable
-// total_size[ndims] - The total collated size of this variable
-// returns true if any of the dimensions are collated
-bool get_collation_info(int ncid, int varid,
-                        size_t in_offset[], size_t out_offset[],
-                        size_t local_size[], size_t total_size[],
-                        int ndims) {
-
-    // Get the dimension ids
-    int dimids[ndims];
-    NCERR(nc_inq_vardimid(ncid, varid, dimids));
-
-    bool is_collated[ndims];
-    bool out = false;
-
-    for (int d=0; d<ndims; ++d) {
-        // Dimension name
-        char dimname[NC_MAX_NAME+1];
-        NCERR(nc_inq_dimname(ncid, dimids[d], dimname));
-
-        // Get the decomposition
-        int decomposition[4];
-        is_collated[d] = get_collated_dim_decomp(ncid, dimname, decomposition);
-
-        // Calculate the per-dim values
-        if (is_collated[d]) {
-            in_offset[d] = 0;
-            out_offset[d] = decomposition[2] - 1;
-            local_size[d] = decomposition[3] - out_offset[d];
-            total_size[d] = decomposition[1];
-        } else {
-            in_offset[d] = 0;
-            out_offset[d] = 0;
-            size_t len;
-            NCERR(nc_inq_dimlen(ncid, dimids[d], &len));
-            local_size[d] = len;
-            total_size[d] = len;
-        }
-
-        // Will be true if any dimension is collated
-        out = out || is_collated[d];
-    }
-    return out;
-}
-
-// Returns true if any of the dimensions are collated
-bool is_collated(int ncid, int varid) {
-    int ndims;
-    NCERR(nc_inq_varndims(ncid, varid, &ndims));
-
-    // We'll discard these arrays
-    size_t in_offset[ndims];
-    size_t out_offset[ndims];
-    size_t local_size[ndims];
-    size_t total_size[ndims];
-
-    return get_collation_info(ncid, varid, in_offset, out_offset, local_size, total_size, ndims);
-}
 
 // Print diagnostic information about this file's collation
 void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
@@ -389,6 +308,7 @@ size_t copy_chunked_variable(varid_t var_id, const char * in_path, const char * 
     return total_copied_size;
 }
 
+/*
 // Copy chunked variables - these may be compressed, so we'll use HDF5. Since
 // we can't have the same file open in both HDF5 and NetCDF4 modes we need to
 // do a bit of shuffling to get all the metadata.
@@ -431,6 +351,8 @@ void copy_chunked(char ** in_paths, int n_in) {
 
     // fprintf(stdout, "Total compressed size %.2f GiB | %.2f GiB / sec\n", total_size_gb, total_size_gb/(t_end - t_start));
 }
+*/
+
 
 // Copy contiguous variables - no chunking means no compression, so we can just
 // use NetCDF
@@ -574,7 +496,9 @@ int main(int argc, char ** argv) {
     const char * in_path = argv[arg_index];
     const char * out_path = args.output;
 
-    if (comm_rank == 0) {
+    int writer_rank = 0;
+
+    if (comm_rank == writer_rank) {
         check_chunking(argv+arg_index, argc-arg_index);
 
         // Copy metadata and un-collated variables
@@ -603,7 +527,7 @@ int main(int argc, char ** argv) {
 
         while (my_file_idx < argc-arg_index) {
             // Read chunked variables using HDF5, sending data to the async_writer to be written
-            copy_chunked(argv+arg_index+my_file_idx, 1);
+            copy_chunked(argv[arg_index+my_file_idx], writer_rank);
 
             MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
             MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);

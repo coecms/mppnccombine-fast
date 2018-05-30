@@ -32,13 +32,23 @@ typedef struct {
     int idx; 
 } varid_t;
 
-// Write data to the file, using the dataset filters
-void write_filtered_async(
+
+// Get info about a variable
+void variable_info_async(
     varid_t var,
     size_t ndims,
-    size_t chunk_offset[],
-    size_t chunk_shape[],
-    void * buffer,
+    size_t chunk[],
+    int async_writer_rank
+    );
+
+
+// Write data to the file, using the dataset filters
+void write_uncompressed_async(
+    varid_t var,
+    size_t ndims,
+    const size_t chunk_offset[],
+    const size_t chunk_shape[],
+    const void * buffer,
     nc_type type,
     int async_writer_rank,
     MPI_Request * request);
