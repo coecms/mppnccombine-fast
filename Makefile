@@ -1,7 +1,7 @@
 CC      = ${COMPILER_ENV} mpicc
 #CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -O0 -traceback
 CFLAGS  = -std=c99 -Wall -Werror -g -O2
-LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
+LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5 -lm
 
 ifneq ($(filter raijin%, ${HOSTNAME}),)
     # Setup the Raijin environment
