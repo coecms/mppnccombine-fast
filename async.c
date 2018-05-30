@@ -76,7 +76,6 @@ void close_variable_async(
 
 // Change a NetCDF type to MPI
 MPI_Datatype type_nc_to_mpi(nc_type type) {
-    MPI_Datatype type_mpi;
     switch (type) {
         case (NC_INT):
             return MPI_INT;
@@ -93,7 +92,6 @@ MPI_Datatype type_nc_to_mpi(nc_type type) {
 }
 // Change a NetCDF type to HDF5
 hid_t type_nc_to_h5(nc_type type) {
-    MPI_Datatype type_mpi;
     switch (type) {
         case (NC_INT):
             return H5T_NATIVE_INT;
@@ -373,7 +371,6 @@ static void receive_close_variable_async(
     MPI_Status status) {
 
     int idx = 0;
-    int comm_size;
     MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE, TAG_CLOSE_VARIABLE,
              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
