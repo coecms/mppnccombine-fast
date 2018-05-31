@@ -9,6 +9,20 @@ ifneq ($(filter raijin%, ${HOSTNAME}),)
     TEST_ENV     = module purge; module load conda openmpi/3.0.1;
 endif
 
+ifneq (${CONDA_BUILD},)
+    # Load dependencies from conda
+    # conda create -c conda-forge -n mppnccombine-fast-build gcc openmpi 'hdf5>=1.10.2' libnetcdf
+    # conda create -c conda-forge -n mppnccombine-fast-test openmpi pytest xarray
+    # Run 'conda activate' first so 'source' will work
+    SHELL = bash
+    COMPILER_ENV = source activate mppnccombine-fast-build;
+    TEST_ENV = source activate mppnccombine-fast-test;
+endif
+
+ifneq (${PROFILE},)
+    CFLAGS += -fprofile-arcs -ftest-coverage
+endif
+
 all: mppnccombine-fast
 
 test: mppnccombine-fast
