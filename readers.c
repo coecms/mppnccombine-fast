@@ -347,7 +347,32 @@ void copy_chunked(const char * filename, int async_writer_rank) {
         size_t out_chunk[ndims];
         variable_info_async(var, ndims, out_chunk, async_writer_rank);
 
-        copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
+        // Offset of this file in the collation
+        size_t out_offset[ndims];
+        size_t local_size[ndims];
+        size_t total_size[ndims];
+        {
+            size_t in_offset[ndims];
+            get_collation_info(ncid, v, in_offset, out_offset, local_size, total_size, ndims);
+        }
+
+        bool is_aligned = true;
+        for (int d=0;d<ndims;++d) {
+            is_aligned &= in_chunk[d] == out_chunk[d];
+            // Start lines up with chunks
+            is_aligned &= out_offset[d]%out_chunk[d] == 0;
+            // End lines up with chunks, or is the final chunk
+            is_aligned &= ((out_offset[d] + local_size[d])%out_chunk[d] == 0
+                           || out_offset[d] + local_size[d] == total_size[d]);
+        }
+
+        if (is_aligned) {
+            fprintf(stdout, "\tAligned HDF5 copy of %s from %s\n", varname, filename);
+            copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
+        } else {
+            fprintf(stdout, "\tUnaligned NetCDF4 copy of %s from %s\n", varname, filename);
+            copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
+        }
 
         close_variable_async(var, async_writer_rank);
     }
