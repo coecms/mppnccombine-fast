@@ -438,7 +438,7 @@ void copy_chunked(const char * filename, int async_writer_rank) {
             copy_hdf5_variable_chunks(var, filename, varname, out_offset, local_size, ndims, async_writer_rank);
             NCERR(nc_open(filename, NC_NOWRITE, &ncid));
         } else {
-            fprintf(stdout, "\tUnaligned NetCDF4 copy of %s from %s\n", varname, filename);
+            fprintf(stdout, "\tUnaligned (slow) NetCDF4 copy of %s from %s\n", varname, filename);
             copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
         }
 
