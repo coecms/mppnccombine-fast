@@ -17,8 +17,6 @@
  */
 
 #include "netcdf.h"
-#include "hdf5.h"
-#include "hdf5_hl.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +27,7 @@
 
 #include "error.h"
 #include "async.h"
-#include "readers.h"
+#include "read_chunked.h"
 
 #define TAG_DECOMP 1
 #define TAG_CHUNK 2

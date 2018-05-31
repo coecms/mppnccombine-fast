@@ -28,7 +28,7 @@ all: mppnccombine-fast
 test: mppnccombine-fast
 	${TEST_ENV} pytest test.py
 
-mppnccombine-fast: async.o error.o readers.o
+mppnccombine-fast: async.o error.o read_chunked.o
 
 clean:
 	${RM} mppnccombine-fast *.o
