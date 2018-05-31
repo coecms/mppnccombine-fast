@@ -33,8 +33,7 @@ void get_collated_dim_len(int ncid, const char * varname, size_t * len);
 // total_size[ndims] - The total collated size of this variable
 // returns true if any of the dimensions are collated
 bool get_collation_info(int ncid, int varid,
-                        size_t in_offset[], size_t out_offset[],
-                        size_t local_size[], size_t total_size[],
+                        size_t out_offset[], size_t local_size[], size_t total_size[],
                         int ndims);
 
 // Returns true if any of the dimensions are collated

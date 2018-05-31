@@ -77,11 +77,12 @@ void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
     size_t local_size[ndims];
     size_t total_size[ndims];
 
-    get_collation_info(ncid_in, varid_in, in_offset, out_offset, local_size, total_size, ndims);
+    get_collation_info(ncid_in, varid_in, out_offset, local_size, total_size, ndims);
 
     size_t size = 1;
     for (int d=0; d<ndims; ++d) {
         size *= local_size[d];
+        in_offset[d] = 0;
     }
 
     print_offsets(out_offset, local_size, ndims);
@@ -288,7 +289,9 @@ size_t copy_chunked_variable(varid_t var_id, const char * in_path, const char * 
     size_t local_shape[ndims];
     size_t global_shape[ndims];
 
-    get_collation_info(in_nc4, varid, in_offset, out_offset, local_shape, global_shape, ndims);
+    for (int d=0;d<ndims;++d) in_offset[d] = 0;
+
+    get_collation_info(in_nc4, varid, out_offset, local_shape, global_shape, ndims);
     NCERR(nc_close(in_nc4));
 
     fprintf(stdout, "\tHDF5 copy of %s from %s\n", varname, in_path);

@@ -60,8 +60,7 @@ void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
 // total_size[ndims] - The total collated size of this variable
 // returns true if any of the dimensions are collated
 bool get_collation_info(int ncid, int varid,
-                        size_t in_offset[], size_t out_offset[],
-                        size_t local_size[], size_t total_size[],
+                        size_t out_offset[], size_t local_size[], size_t total_size[],
                         int ndims) {
 
     // Get the dimension ids
@@ -82,12 +81,10 @@ bool get_collation_info(int ncid, int varid,
 
         // Calculate the per-dim values
         if (is_collated[d]) {
-            in_offset[d] = 0;
             out_offset[d] = decomposition[2] - 1;
             local_size[d] = decomposition[3] - out_offset[d];
             total_size[d] = decomposition[1];
         } else {
-            in_offset[d] = 0;
             out_offset[d] = 0;
             size_t len;
             NCERR(nc_inq_dimlen(ncid, dimids[d], &len));
@@ -107,12 +104,11 @@ bool is_collated(int ncid, int varid) {
     NCERR(nc_inq_varndims(ncid, varid, &ndims));
 
     // We'll discard these arrays
-    size_t in_offset[ndims];
     size_t out_offset[ndims];
     size_t local_size[ndims];
     size_t total_size[ndims];
 
-    return get_collation_info(ncid, varid, in_offset, out_offset, local_size, total_size, ndims);
+    return get_collation_info(ncid, varid, out_offset, local_size, total_size, ndims);
 }
 
 
@@ -229,7 +225,6 @@ void get_chunk_offset_shape(size_t ndims,                // Number of dims
             chunk_shape[i] = chunk[i] - (local_offset[i] - chunk_offset_out[i]);
             chunk_offset_out[i] = local_offset[i];
         }
-        printf("%zu %zu %zu %zu\n", c, chunk_offset_in[0], chunk_offset_out[0], chunk_shape[0]);
 
         // Total size in dimension 'i'
         ssize_t total_size = (chunk[i] - local_offset[i]%chunk[i])
@@ -269,10 +264,9 @@ void copy_netcdf_variable_chunks(
     size_t chunk_size = 1;
 
     {
-        size_t in_offset[ndims];
         size_t total_shape[ndims];
 
-        get_collation_info(ncid, varid, in_offset, local_offset,
+        get_collation_info(ncid, varid, local_offset,
                            shape, total_shape, ndims);
     }
 
@@ -284,7 +278,6 @@ void copy_netcdf_variable_chunks(
 
         // Need to account for partial chunks at the start of this file's block
         nchunks[i] = ceil(((local_offset[i] % chunk[i]) + shape[i]) / (float)chunk[i]);
-        printf("chunks %zu\n",nchunks[i]);
 
         total_chunks *= nchunks[i];
         chunk_size *= chunk[i];
@@ -305,7 +298,6 @@ void copy_netcdf_variable_chunks(
                                c, chunk_offset_in, chunk_offset_out, chunk_shape,
                                &partial_chunk);
 
-        printf("%zu %zu\n", chunk_offset_in[0], chunk_shape[0]);
         NCERR(nc_get_vara(ncid, varid, chunk_offset_in, chunk_shape, buffer));
 
         MPI_Request request;
@@ -315,6 +307,83 @@ void copy_netcdf_variable_chunks(
     }
 
     free(buffer);
+}
+
+// Copy a variable using HDF5's optimised IO
+// This is faster than the normal IO as it doesn't need to de-compress and
+// re-compress the data, however it only works when the source and target
+// chunking and compression settings are identical
+void copy_hdf5_variable_chunks(
+                  varid_t varid,
+                  const char * filename,
+                  const char * varname,
+                  const size_t out_offset[], // Output offset [ndims]
+                  const size_t shape[],      // Shape to copy [ndims]
+                  int ndims,                 // Number of dimensions
+                  int async_writer_rank
+                 ) {
+    // Open in HDF5 mode to do the copy
+    hid_t in_file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
+    H5ERR(in_file);
+    hid_t in_var = H5Dopen(in_file, varname, H5P_DEFAULT);
+    H5ERR(in_var);
+
+    // Get the chunk metadata
+    hsize_t chunk[ndims];
+    hid_t in_plist = H5Dget_create_plist(in_var);
+    H5ERR(H5Pget_chunk(in_plist, ndims, chunk));
+    H5ERR(H5Pclose(in_plist));
+
+    // Get the number of chunks, total and in each dim
+    int n_chunks = 1;
+    int chunk_decomp[ndims];
+    for (int d=0; d<ndims; ++d) {
+        chunk_decomp[d] = shape[d] / chunk[d];
+        n_chunks *= chunk_decomp[d];
+    }
+
+    // Buffer 
+    size_t n_buffer = 1024^3;
+    void * buffer = malloc(n_buffer);
+
+    hsize_t copy_out_offset[ndims];
+    hsize_t copy_in_offset[ndims];
+
+    // Loop over all the chunks
+    for (int c=0; c<n_chunks; ++c) {
+        hsize_t offset[ndims];
+        int i = c;
+        for (int d=ndims-1; d>=0; --d) {
+            offset[d] = (i % chunk_decomp[d]) * chunk[d];
+            i /= chunk_decomp[d];
+
+            copy_out_offset[d] = out_offset[d] + offset[d];
+            copy_in_offset[d]  = offset[d];
+        }
+
+        // Get the block size
+        hsize_t block_size;
+        H5ERR(H5Dget_chunk_storage_size(in_var, copy_in_offset, &block_size));
+
+        // Make sure the buffer is large enough
+        if (block_size > n_buffer) {
+            n_buffer = block_size;
+            buffer = realloc(buffer, n_buffer);
+        }
+
+        // Copy this chunk's data
+        uint32_t filter_mask = 0;
+        H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
+
+        MPI_Request request;
+        write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+    }
+
+    free(buffer);
+
+    H5ERR(H5Dclose(in_var));
+    H5ERR(H5Fclose(in_file));
 }
 
 // Copy all chunked variables
@@ -351,10 +420,7 @@ void copy_chunked(const char * filename, int async_writer_rank) {
         size_t out_offset[ndims];
         size_t local_size[ndims];
         size_t total_size[ndims];
-        {
-            size_t in_offset[ndims];
-            get_collation_info(ncid, v, in_offset, out_offset, local_size, total_size, ndims);
-        }
+        get_collation_info(ncid, v, out_offset, local_size, total_size, ndims);
 
         bool is_aligned = true;
         for (int d=0;d<ndims;++d) {
@@ -368,7 +434,9 @@ void copy_chunked(const char * filename, int async_writer_rank) {
 
         if (is_aligned) {
             fprintf(stdout, "\tAligned HDF5 copy of %s from %s\n", varname, filename);
-            copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
+            NCERR(nc_close(ncid));
+            copy_hdf5_variable_chunks(var, filename, varname, out_offset, local_size, ndims, async_writer_rank);
+            NCERR(nc_open(filename, NC_NOWRITE, &ncid));
         } else {
             fprintf(stdout, "\tUnaligned NetCDF4 copy of %s from %s\n", varname, filename);
             copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
