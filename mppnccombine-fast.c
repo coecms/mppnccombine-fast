@@ -185,9 +185,19 @@ void copy_attrs(int ncid_out, int varid_out, int ncid_in, int varid_in, int natt
         size_t attlen;
         NCERR(nc_inq_attname(ncid_in, varid_in, a, attname));
         NCERR(nc_inq_att(ncid_in, varid_in, attname, &atttype, &attlen));
+        if (varid_in == NC_GLOBAL && strcmp(attname, "NumFilesInSet") == 0)
+            continue; // Don't copy
         // Check the buffer is big enough
         assert(attlen * 8 < buffer_len);
         NCERR(nc_get_att(ncid_in, varid_in, attname, buffer));
+        if (varid_in == NC_GLOBAL && strcmp(attname, "filename") == 0)
+        {
+            // Replace filename attribute with new collated filename
+            NCERR(nc_inq_path(ncid_out, &attlen, NULL));
+            // Check the buffer is big enough
+            assert(attlen * 8 < buffer_len);
+            NCERR(nc_inq_path(ncid_out, NULL, buffer));
+        }
         NCERR(nc_put_att(ncid_out, varid_out, attname, atttype, attlen, buffer));
     }
 }
