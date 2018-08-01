@@ -214,6 +214,13 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
     NCERR(nc_close(out_nc4));
 }
 
+void file_match_check(bool test, const char * filea, const char * fileb, const char * message) {
+    if (! test) {
+        fprintf(stderr, "ERROR: %s <%s> <%s>\n", message, filea, fileb);
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+}
+
 void check_chunking(char ** in_paths, int n_in) {
     int ncid0, nvars;
     NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
@@ -242,10 +249,14 @@ void check_chunking(char ** in_paths, int n_in) {
             NCERR(nc_inq_var_chunking(ncid, v, &storage, chunk));
             NCERR(nc_inq_var_deflate(ncid, v, &shuffle, &deflate, &deflate_level));
 
-            assert(storage == storage0);
-            assert(shuffle == shuffle0);
-            assert(deflate == deflate0);
-            assert(deflate_level == deflate_level0);
+            file_match_check(storage == storage0, in_paths[0], in_paths[i],
+                             "'storage' attributes don't match between");
+            file_match_check(shuffle == shuffle0, in_paths[0], in_paths[i],
+                             "'shuffle' attributes don't match between");
+            file_match_check(deflate == deflate0, in_paths[0], in_paths[i],
+                             "'deflate' attributes don't match between");
+            file_match_check(deflate_level == deflate_level0, in_paths[0], in_paths[i],
+                             "'deflate_level' attributes don't match between");
 
             if (storage == NC_CHUNKED) {
                 for (int d=0; d<ndims; ++d){

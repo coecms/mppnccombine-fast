@@ -25,10 +25,21 @@ import pytest
 
 # Run the collation program
 def run_collate(inputs, output, np=2):
-    subprocess.run(
+    subprocess.check_output(
             ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', output] + inputs,
-            check=True)
+            stderr=subprocess.STDOUT)
     return xarray.open_dataset(str(output), engine='netcdf4')
+
+def split_dataset(data, split):
+    out = []
+
+    for start in range(0, len(data['x']), split['x']):
+        d = data.isel(**{'x': slice(start, start+split['x'])})
+        d['x'].attrs['domain_decomposition'] = [1,len(data['x']), 1+start, min(start+split['x'], len(data['x']))]
+
+        out.append(d)
+
+    return out
 
 
 def split_file(tmpdir, data, split):
@@ -113,3 +124,41 @@ def test_split_off_boundary(tmpdir):
 
     assert (c.a.data == d.a.data).all()
     assert (c.x.data == d.x.data).all()
+    
+def test_different_compression(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4))
+            },
+            coords = {
+                'x': np.arange(4),
+            })
+
+    split = split_dataset(d, {'x': 2})
+
+    infiles = [str(x) for x in [tmpdir.join('000.nc'), tmpdir.join('001.nc')]]
+
+    # Save with different compression settings
+    split[0].to_netcdf(infiles[0],
+            encoding = {'a': {
+                'chunksizes': (2,),
+                'zlib': True,
+                'shuffle': True,
+                'complevel': 4,
+                }})
+    split[1].to_netcdf(infiles[1],
+            encoding = {'a': {
+                'chunksizes': (2,),
+                'zlib': True,
+                'shuffle': False,
+                'complevel': 6,
+                }})
+
+    outpath = tmpdir.join('out.nc')
+
+    # Fails because of different compressions
+    with pytest.raises(subprocess.CalledProcessError) as errinfo:
+        c = run_collate(infiles, outpath)
+
+    assert "attributes don't match" in errinfo.value.output.decode()
+
