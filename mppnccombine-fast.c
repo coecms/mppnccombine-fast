@@ -87,9 +87,19 @@ void copy_attrs(int ncid_out, int varid_out, int ncid_in, int varid_in, int natt
         size_t attlen;
         NCERR(nc_inq_attname(ncid_in, varid_in, a, attname));
         NCERR(nc_inq_att(ncid_in, varid_in, attname, &atttype, &attlen));
+        if (varid_in == NC_GLOBAL && strcmp(attname, "NumFilesInSet") == 0)
+            continue; // Don't copy
         // Check the buffer is big enough
         assert(attlen * 8 < buffer_len);
         NCERR(nc_get_att(ncid_in, varid_in, attname, buffer));
+        if (varid_in == NC_GLOBAL && strcmp(attname, "filename") == 0)
+        {
+            // Replace filename attribute with new collated filename
+            NCERR(nc_inq_path(ncid_out, &attlen, NULL));
+            // Check the buffer is big enough
+            assert(attlen * 8 < buffer_len);
+            NCERR(nc_inq_path(ncid_out, NULL, buffer));
+        }
         NCERR(nc_put_att(ncid_out, varid_out, attname, atttype, attlen, buffer));
     }
 }
@@ -223,12 +233,17 @@ void file_match_check(bool test, const char * filea, const char * fileb, const c
 
 void check_chunking(char ** in_paths, int n_in) {
     int ncid0, nvars;
+    nc_type type;
+    int ndims;
+    int natts;
+
     NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
     NCERR(nc_inq_nvars(ncid0, &nvars));
     
     for (int v=0; v<nvars; ++v) {
+	char varname[NC_MAX_NAME+1];
         int ndims;
-        NCERR(nc_inq_varndims(ncid0, v, &ndims));
+	NCERR(nc_inq_var(ncid0, v, varname, NULL, &ndims, NULL, NULL));
 
         int storage0;
         size_t chunk0[ndims];
@@ -237,6 +252,8 @@ void check_chunking(char ** in_paths, int n_in) {
         int deflate_level0;
         NCERR(nc_inq_var_chunking(ncid0, v, &storage0, chunk0));
         NCERR(nc_inq_var_deflate(ncid0, v, &shuffle0, &deflate0, &deflate_level0));
+
+	// fprintf(stdout, "Checking chunking matches for variable \n", varname);
 
         for (int i=1; i<n_in; ++i) {
             int ncid;
@@ -260,7 +277,12 @@ void check_chunking(char ** in_paths, int n_in) {
 
             if (storage == NC_CHUNKED) {
                 for (int d=0; d<ndims; ++d){
-                    assert(chunk[d] == chunk0[d]);
+
+		  if (! chunk[d] == chunk0[d]) {
+		    fprintf(stderr,"Incompatible chunking for variable %s in %s: %zd - %zd",
+			    varname, in_paths[i], chunk[d], chunk0[d]);
+		    exit(1);
+		  }
                 }
             }
 
