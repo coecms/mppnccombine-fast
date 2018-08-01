@@ -233,9 +233,6 @@ void file_match_check(bool test, const char * filea, const char * fileb, const c
 
 void check_chunking(char ** in_paths, int n_in) {
     int ncid0, nvars;
-    nc_type type;
-    int ndims;
-    int natts;
 
     NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
     NCERR(nc_inq_nvars(ncid0, &nvars));
