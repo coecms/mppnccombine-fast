@@ -1,24 +1,34 @@
-CC_    ?= mpicc
-CC      = ${CC_}
-#CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -traceback
-CFLAGS  = -std=c99 -Wall -Werror -g -O2
-LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
+CC      = ${COMPILER_ENV} mpicc
+#CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -O0 -traceback
+CFLAGS  = -std=c99 -Wall -Wextra -g -O2
+LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5 -lm
 
-# # Conda
-# CFLAGS += -I${CONDA_PREFIX}/include
-# LDFLAGS = -L${CONDA_PREFIX}/lib -Wl,-rpath=${CONDA_PREFIX}/lib
+ifneq ($(filter raijin%, ${HOSTNAME}),)
+    # Setup the Raijin environment
+    COMPILER_ENV = module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2;
+    TEST_ENV     = module purge; module load conda openmpi/3.0.1;
+endif
 
-# Use `module load netcdf/4.6.1 hdf5/1.10.2`
-with_module:
-	module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2 scorep/3.1; ${MAKE} all
+ifneq (${CONDA_BUILD},)
+    # Load dependencies from conda
+    # conda create -c conda-forge -n mppnccombine-fast-build gcc openmpi 'hdf5>=1.10.2' libnetcdf
+    # conda create -c conda-forge -n mppnccombine-fast-test openmpi pytest xarray
+    # Run 'conda activate' first so 'source' will work
+    SHELL = bash
+    COMPILER_ENV = source activate mppnccombine-fast-build;
+    TEST_ENV = source activate mppnccombine-fast-test;
+endif
+
+ifneq (${PROFILE},)
+    CFLAGS += -fprofile-arcs -ftest-coverage
+endif
 
 all: mppnccombine-fast
 
-mppnccombine-fast: async.o error.o
+test: mppnccombine-fast
+	${TEST_ENV} pytest test.py
+
+mppnccombine-fast: async.o error.o read_chunked.o
 
 clean:
 	${RM} mppnccombine-fast *.o
-
-scorep: CC_ = scorep mpicc
-scorep: with_module
-	SCOREP_EXPERIMENT_DIRECTORY=scorep mpirun -n 2 ./mppnccombine-fast --output /g/data/w35/saw562/test0.nc /short/v45/aek156/access-om2/archive/01deg_jra55_ryf/output243/ocean/ocean_temp_3hourly.nc.0000
