@@ -17,6 +17,7 @@
  */
 
 #include "error.h"
+#include <stdio.h>
 
 #include "hdf5.h"
 #include "netcdf.h"
@@ -45,5 +46,19 @@ void handle_c_error(int err, const char * message, const char * file, int line) 
     if (err != 0) {
         fprintf(stderr, "ERROR %s:%d %s\n", file, line, message);
         MPI_Abort(MPI_COMM_WORLD, err);
+    }
+}
+
+static int log_level;
+
+void set_log_level(int level) {
+    log_level = level;
+}
+
+void log_message(int level, const char * message) {
+    if (level <= log_level) {
+        int rank;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        printf("[%003d]\t%s\n", rank, message);
     }
 }

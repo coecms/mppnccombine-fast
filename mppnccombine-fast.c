@@ -312,10 +312,11 @@ static char doc[] = "Quickly collate MOM output files";
 
 static struct argp_option opts[] = {
     {"output", 'o', "FILE", 0, "Output file"},
-    {"deflate", 'd', "[0-9]", 0, "Compression level"},
-    {"no-shuffle", 's', 0, 0, "Disable shuffle filter"},
+    {"deflate", 'd', "[0-9]", 0, "Override compression level (slower)"},
+    {"no-shuffle", 's', 0, 0, "Disable shuffle filter (slower)"},
     {"force", 'f', 0, 0, "Combine even if output file present"},
     {"remove", 'r', 0, 0, "Remove the input files after completion"},
+    {"verbose", 'v', 0, 0, "Be verbose"},
     {0},
 };
 
@@ -341,6 +342,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             break;
         case 'r':
             args->remove = true;
+            break;
+        case 'v':
+            set_log_level(LOG_INFO);
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -416,6 +420,8 @@ int main(int argc, char ** argv) {
         int increment = 1;
         int my_file_idx = -1;
 
+        log_message(LOG_DEBUG, "Starting read");
+
         // Atomic post-addition of increment to current_file_idx
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
         MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
@@ -430,9 +436,11 @@ int main(int argc, char ** argv) {
             MPI_Win_unlock(0, current_file_win);
         }
         close_async(0);
+        log_message(LOG_DEBUG, "Finished read");
     }
 
     if (comm_rank == writer_rank && args.remove) {
+        log_message(LOG_INFO, "Cleaning inputs");
         int my_file_idx = 0;
         while (my_file_idx < argc-arg_index) {
             unlink(argv[arg_index+my_file_idx]);
