@@ -37,6 +37,7 @@ struct args_t {
     const char * output;
     int deflate_level;
     int shuffle;
+    bool force;
 };
 
 // Print diagnostic information about this file's collation
@@ -118,7 +119,10 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
 
     // Open both files
     NCERR(nc_open(in_path, NC_NOWRITE, &in_file));
-    NCERR(nc_create(out_path, NC_NETCDF4 | NC_CLOBBER, &out_file));
+
+    int out_flags = NC_NETCDF4;
+    if (!args->force) out_flags |= NC_NOCLOBBER;
+    NCERR(nc_create(out_path, out_flags, &out_file));
 
     int ndims;
     int nvars;
@@ -308,6 +312,7 @@ static struct argp_option opts[] = {
     {"output", 'o', "FILE", 0, "Output file"},
     {"deflate", 'd', "[0-9]", 0, "Compression level"},
     {"no-shuffle", 's', 0, 0, "Disable shuffle filter"},
+    {"force", 'f', 0, 0, "Combine even if output file present"},
     {0},
 };
 
@@ -327,6 +332,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             break;
         case 's':
             args->shuffle = 0;
+            break;
+        case 'f':
+            args->force = true;
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -358,6 +366,7 @@ int main(int argc, char ** argv) {
     struct args_t args = {0};
     args.deflate_level = -1;
     args.shuffle = -1;
+    args.force = false;
 
     argp_parse(&argp, argc, argv, 0, &arg_index, &args);
     if (args.output == NULL) {

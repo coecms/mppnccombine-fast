@@ -25,9 +25,13 @@ import pytest
 
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
-    subprocess.check_output(
-            ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', output] + inputs + args,
-            stderr=subprocess.STDOUT)
+    try:
+        subprocess.check_output(
+                ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args,
+                stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        print(e.stdout.decode('utf-8'))
+        raise
     return xarray.open_dataset(str(output), engine='netcdf4')
 
 def split_dataset(data, split):
@@ -178,3 +182,24 @@ def test_compression_override(tmpdir):
 
     assert c.a.encoding['complevel'] == 8
     assert c.a.encoding['shuffle'] == False
+
+def test_clobber(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4))
+            },
+            coords = {
+                'x': np.arange(4),
+            })
+
+    infiles = split_file(tmpdir, d, {'x': 2})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath)
+    c.close()
+
+    with pytest.raises(subprocess.CalledProcessError):
+        c = run_collate(infiles, outpath)
+
+    c = run_collate(infiles, outpath, args=['-f'])
+
