@@ -41,9 +41,9 @@ void handle_h5_error(int err, const char * file, int line) {
     }
 }
 
-void handle_c_error(int err, const char * file, int line) {
+void handle_c_error(int err, const char * message, const char * file, int line) {
     if (err != 0) {
-        fprintf(stderr, "ERROR %s:%d\n", file, line);
+        fprintf(stderr, "ERROR %s:%d %s\n", file, line, message);
         MPI_Abort(MPI_COMM_WORLD, err);
     }
 }

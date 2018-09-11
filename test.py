@@ -24,9 +24,9 @@ import netCDF4
 import pytest
 
 # Run the collation program
-def run_collate(inputs, output, np=2):
+def run_collate(inputs, output, np=2, args=[]):
     subprocess.check_output(
-            ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', output] + inputs,
+            ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', output] + inputs + args,
             stderr=subprocess.STDOUT)
     return xarray.open_dataset(str(output), engine='netcdf4')
 
@@ -162,3 +162,19 @@ def test_different_compression(tmpdir):
 
     assert "attributes don't match" in errinfo.value.output.decode()
 
+def test_compression_override(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4))
+            },
+            coords = {
+                'x': np.arange(4),
+            })
+
+    infiles = split_file(tmpdir, d, {'x': 2})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath, args=['-d','8','-s'])
+
+    assert c.a.encoding['complevel'] == 8
+    assert c.a.encoding['shuffle'] == False

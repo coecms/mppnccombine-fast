@@ -33,6 +33,12 @@
 #define TAG_CHUNK 2
 
 
+struct args_t {
+    const char * output;
+    int deflate_level;
+    int shuffle;
+};
+
 // Print diagnostic information about this file's collation
 void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
     /*
@@ -106,7 +112,7 @@ void copy_attrs(int ncid_out, int varid_out, int ncid_in, int varid_in, int natt
 
 // Copy NetCDF headers and uncollated variables from file at in_path to file at
 // out_path
-void init(const char * in_path, const char * out_path) {
+void init(const char * in_path, const char * out_path, const struct args_t * args) {
     int in_file;
     int out_file;
 
@@ -172,6 +178,11 @@ void init(const char * in_path, const char * out_path) {
             int deflate;
             int deflate_level;
             NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
+
+            // Option to override compression
+            if (args->deflate_level != -1) deflate_level = args->deflate_level; 
+            if (args->shuffle != -1) shuffle = args->shuffle; 
+
             if (shuffle || deflate) {
                 NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
             }
@@ -291,23 +302,31 @@ void check_chunking(char ** in_paths, int n_in) {
     NCERR(nc_close(ncid0));
 }
 
-struct args_t {
-    const char * output;
-};
-
 static char doc[] = "Quickly collate MOM output files";
 
 static struct argp_option opts[] = {
     {"output", 'o', "FILE", 0, "Output file"},
+    {"deflate", 'd', "[0-9]", 0, "Compression level"},
+    {"no-shuffle", 's', 0, 0, "Disable shuffle filter"},
     {0},
 };
 
 static error_t parse_opt(int key, char *arg, struct argp_state * state) {
     struct args_t * args = state->input;
+    int err;
 
     switch(key) {
         case 'o':
             args->output = arg;
+            break;
+        case 'd':
+            err = sscanf(arg, "%d", &(args->deflate_level));
+            if (err != 1) CERR(-1, "Bad deflate value");
+            if (args->deflate_level < 0) CERR(-1, "Bad deflate value");
+            if (args->deflate_level > 9) CERR(-1, "Bad deflate value");
+            break;
+        case 's':
+            args->shuffle = 0;
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -337,6 +356,8 @@ int main(int argc, char ** argv) {
 
     int arg_index;
     struct args_t args = {0};
+    args.deflate_level = -1;
+    args.shuffle = -1;
 
     argp_parse(&argp, argc, argv, 0, &arg_index, &args);
     if (args.output == NULL) {
@@ -362,7 +383,7 @@ int main(int argc, char ** argv) {
 
         // Copy metadata and un-collated variables
         fprintf(stdout, "\nCopying non-collated variables\n");
-        init(in_path, out_path);
+        init(in_path, out_path, &args);
         // Copy contiguous variables using NetCDF
         fprintf(stdout, "\nCopying contiguous variables\n");
         copy_contiguous(out_path, argv+arg_index, argc-arg_index);

@@ -29,8 +29,8 @@ void handle_nc_error(int err, const char * file, int line);
 #define H5ERR(x) handle_h5_error(x, __FILE__, __LINE__)
 void handle_h5_error(int err, const char * file, int line);
 
-#define CERR(x) handle_c_error(x, __FILE__, __LINE__)
-void handle_c_error(int err, const char * file, int line);
+#define CERR(x, message) handle_c_error(x, message, __FILE__, __LINE__)
+void handle_c_error(int err, const char * message, const char * file, int line);
 
 #ifdef __cplusplus
 }
