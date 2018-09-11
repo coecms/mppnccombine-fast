@@ -22,13 +22,15 @@ import subprocess
 import numpy as np
 import netCDF4
 import pytest
+import os
 
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
     try:
-        subprocess.check_output(
+        s = subprocess.check_output(
                 ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args,
                 stderr=subprocess.STDOUT)
+        print(s.decode('utf-8'))
     except subprocess.CalledProcessError as e:
         print(e.stdout.decode('utf-8'))
         raise
@@ -64,6 +66,7 @@ def split_file(tmpdir, data, split):
                     },
                     }
                 )
+        d.close()
         i+=1
 
     return infiles
@@ -203,3 +206,20 @@ def test_clobber(tmpdir):
 
     c = run_collate(infiles, outpath, args=['-f'])
 
+def test_clean(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4))
+            },
+            coords = {
+                'x': np.arange(4),
+            })
+
+    infiles = split_file(tmpdir, d, {'x': 2})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath, args=['-r'])
+
+    assert not os.path.isfile(infiles[0])
+    assert not os.path.isfile(infiles[1])
+    assert os.path.isfile(outpath)

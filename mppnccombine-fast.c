@@ -24,6 +24,7 @@
 #include <argp.h>
 #include <math.h>
 #include <mpi.h>
+#include <unistd.h>
 
 #include "error.h"
 #include "async.h"
@@ -38,6 +39,7 @@ struct args_t {
     int deflate_level;
     int shuffle;
     bool force;
+    bool remove;
 };
 
 // Print diagnostic information about this file's collation
@@ -313,6 +315,7 @@ static struct argp_option opts[] = {
     {"deflate", 'd', "[0-9]", 0, "Compression level"},
     {"no-shuffle", 's', 0, 0, "Disable shuffle filter"},
     {"force", 'f', 0, 0, "Combine even if output file present"},
+    {"remove", 'r', 0, 0, "Remove the input files after completion"},
     {0},
 };
 
@@ -335,6 +338,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             break;
         case 'f':
             args->force = true;
+            break;
+        case 'r':
+            args->remove = true;
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -367,6 +373,7 @@ int main(int argc, char ** argv) {
     args.deflate_level = -1;
     args.shuffle = -1;
     args.force = false;
+    args.remove = false;
 
     argp_parse(&argp, argc, argv, 0, &arg_index, &args);
     if (args.output == NULL) {
@@ -423,6 +430,14 @@ int main(int argc, char ** argv) {
             MPI_Win_unlock(0, current_file_win);
         }
         close_async(0);
+    }
+
+    if (comm_rank == writer_rank && args.remove) {
+        int my_file_idx = 0;
+        while (my_file_idx < argc-arg_index) {
+            unlink(argv[arg_index+my_file_idx]);
+            my_file_idx++;
+        }
     }
 
     MPI_Win_free(&current_file_win);
