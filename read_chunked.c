@@ -288,19 +288,21 @@ void copy_hdf5_variable_chunks(
         hsize_t block_size;
         H5ERR(H5Dget_chunk_storage_size(in_var, copy_in_offset, &block_size));
 
-        // Make sure the buffer is large enough
-        if (block_size > n_buffer) {
-            n_buffer = block_size;
-            buffer = realloc(buffer, n_buffer);
+        if (block_size > 0) {
+            // Make sure the buffer is large enough
+            if (block_size > n_buffer) {
+                n_buffer = block_size;
+                buffer = realloc(buffer, n_buffer);
+            }
+
+            // Copy this chunk's data
+            uint32_t filter_mask = 0;
+            H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
+
+            MPI_Request request;
+            write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
         }
-
-        // Copy this chunk's data
-        uint32_t filter_mask = 0;
-        H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
-
-        MPI_Request request;
-        write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
     }
 
     free(buffer);
