@@ -124,7 +124,13 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
 
     int out_flags = NC_NETCDF4;
     if (!args->force) out_flags |= NC_NOCLOBBER;
-    NCERR(nc_create(out_path, out_flags, &out_file));
+    int err = nc_create(out_path, out_flags, &out_file);
+    if (err == -35) {
+        log_message(LOG_ERROR, "ERROR: Output file already exists (try --force)");
+        MPI_Abort(MPI_COMM_WORLD, err);
+    } else {
+        NCERR(err);
+    }
 
     int ndims;
     int nvars;
@@ -361,6 +367,7 @@ static struct argp argp = {
 
 int main(int argc, char ** argv) {
     MPI_Init(&argc, &argv);
+    set_log_level(LOG_WARNING);
 
     int comm_rank;
     int comm_size;

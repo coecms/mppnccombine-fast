@@ -59,6 +59,6 @@ void log_message(int level, const char * message) {
     if (level <= log_level) {
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        printf("[%003d]\t%s\n", rank, message);
+        printf("[rank %003d] %s\n", rank, message);
     }
 }
