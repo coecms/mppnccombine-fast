@@ -181,7 +181,7 @@ def test_compression_override(tmpdir):
     infiles = split_file(tmpdir, d, {'x': 2})
 
     outpath = tmpdir.join('out.nc')
-    c = run_collate(infiles, outpath, args=['-d','8','-s'])
+    c = run_collate(infiles, outpath, args=['-d','8','--no-shuffle'])
 
     assert c.a.encoding['complevel'] == 8
     assert c.a.encoding['shuffle'] == False

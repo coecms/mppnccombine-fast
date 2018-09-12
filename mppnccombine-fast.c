@@ -353,7 +353,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             args->shuffle = 1;
             break;
         case -2:
-            args->shuffle = 2;
+            args->shuffle = 0;
             break;
         case 'f':
             args->force = true;
