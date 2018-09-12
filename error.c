@@ -66,7 +66,7 @@ void log_message(int level, const char * message, ...) {
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         char * rendered;
         vasprintf(&rendered, message, vargs);
-        printf("[rank %03d] %s", rank, rendered);
+        printf("[rank %03d] %s\n", rank, rendered);
         free(rendered);
         va_end(vargs);
     }

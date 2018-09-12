@@ -126,7 +126,7 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
     if (!args->force) out_flags |= NC_NOCLOBBER;
     int err = nc_create(out_path, out_flags, &out_file);
     if (err == -35) {
-        log_message(LOG_ERROR, "ERROR: Output file already exists (try --force)");
+        log_message(LOG_ERROR, "ERROR: Output file '%s' already exists (try --force)", out_path);
         MPI_Abort(MPI_COMM_WORLD, err);
     } else {
         NCERR(err);
@@ -205,7 +205,7 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
 
         // If the field is not collated copy it now
         if (! is_collated(in_file, v)) {
-            log_message(LOG_INFO, "Uncollated NetCDF copy of %s\n", name);
+            log_message(LOG_INFO, "Uncollated NetCDF copy of %s", name);
             copy_netcdf(out_file, out_v, in_file, v);
         }
     }
@@ -235,7 +235,7 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
         if (storage == NC_CONTIGUOUS) {
             if (is_collated(out_nc4, v)) {
                 for (int i=0; i<n_in; ++i) {
-                    log_message(LOG_INFO, "NetCDF copy of %s from %s\n", varname, in_paths[i]);
+                    log_message(LOG_INFO, "NetCDF copy of %s from %s", varname, in_paths[i]);
                     int in_nc4;
                     NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
                     copy_netcdf(out_nc4, v, in_nc4, v);

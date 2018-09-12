@@ -356,12 +356,12 @@ void copy_chunked(const char * filename, int async_writer_rank) {
         }
 
         if (is_aligned) {
-            log_message(LOG_INFO, "Aligned HDF5 copy of %s from %s\n", varname, filename);
+            log_message(LOG_INFO, "Aligned HDF5 copy of %s from %s", varname, filename);
             NCERR(nc_close(ncid));
             copy_hdf5_variable_chunks(var, filename, varname, out_offset, local_size, ndims, async_writer_rank);
             NCERR(nc_open(filename, NC_NOWRITE, &ncid));
         } else {
-            log_message(LOG_INFO, "Unaligned (slow) NetCDF4 copy of %s from %s\n", varname, filename);
+            log_message(LOG_INFO, "Unaligned (slow) NetCDF4 copy of %s from %s", varname, filename);
             copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
         }
 
