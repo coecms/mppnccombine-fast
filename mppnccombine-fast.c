@@ -317,12 +317,14 @@ void check_chunking(char ** in_paths, int n_in) {
 static char doc[] = "Quickly collate MOM output files";
 
 static struct argp_option opts[] = {
-    {"output", 'o', "FILE", 0, "Output file"},
-    {"deflate", 'd', "[0-9]", 0, "Override compression level (slower)"},
-    {"no-shuffle", 's', 0, 0, "Disable shuffle filter (slower)"},
-    {"force", 'f', 0, 0, "Combine even if output file present"},
-    {"remove", 'r', 0, 0, "Remove the input files after completion"},
-    {"verbose", 'v', 0, 0, "Be verbose"},
+    {"output", 'o', "FILE", 0, "Output file",1},
+    {"force", 'f', 0, 0, "Combine even if output file present",2},
+    {"remove", 'r', 0, 0, "Remove the input files after completion",3},
+    {"deflate", 'd', "[0-9]", 0, "Override compression level (slower)", 4},
+    {"shuffle", -1, 0, 0, "Force enable shuffle filter (slower)", 5},
+    {"no-shuffle", -2, 0, 0, "Force disable shuffle filter (slower)", 6},
+    {"verbose", 'v', 0, 0, "Be verbose",7},
+    {"quiet", 'q', 0, 0, "Be quiet (no warnings)",8},
     {0},
 };
 
@@ -340,8 +342,11 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             if (args->deflate_level < 0) CERR(-1, "Bad deflate value");
             if (args->deflate_level > 9) CERR(-1, "Bad deflate value");
             break;
-        case 's':
-            args->shuffle = 0;
+        case -1:
+            args->shuffle = 1;
+            break;
+        case -2:
+            args->shuffle = 2;
             break;
         case 'f':
             args->force = true;
@@ -351,6 +356,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             break;
         case 'v':
             set_log_level(LOG_INFO);
+            break;
+        case 'q':
+            set_log_level(LOG_ERROR);
             break;
         default:
             return ARGP_ERR_UNKNOWN;
