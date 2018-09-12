@@ -205,7 +205,7 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
 
         // If the field is not collated copy it now
         if (! is_collated(in_file, v)) {
-            fprintf(stdout, "\tUncollated NetCDF copy of %s\n", name);
+            log_message(LOG_INFO, "Uncollated NetCDF copy of %s\n", name);
             copy_netcdf(out_file, out_v, in_file, v);
         }
     }
@@ -235,7 +235,7 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
         if (storage == NC_CONTIGUOUS) {
             if (is_collated(out_nc4, v)) {
                 for (int i=0; i<n_in; ++i) {
-                    fprintf(stdout, "\tNetCDF copy of %s from %s\n", varname, in_paths[i]);
+                    log_message(LOG_INFO, "NetCDF copy of %s from %s\n", varname, in_paths[i]);
                     int in_nc4;
                     NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
                     copy_netcdf(out_nc4, v, in_nc4, v);

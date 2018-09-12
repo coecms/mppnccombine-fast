@@ -15,9 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define _GNU_SOURCE
 
 #include "error.h"
 #include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>
 
 #include "hdf5.h"
 #include "netcdf.h"
@@ -55,10 +58,16 @@ void set_log_level(int level) {
     log_level = level;
 }
 
-void log_message(int level, const char * message) {
+void log_message(int level, const char * message, ...) {
     if (level <= log_level) {
         int rank;
+        va_list vargs;
+        va_start(vargs, message);
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        printf("[rank %003d] %s\n", rank, message);
+        char * rendered;
+        vasprintf(&rendered, message, vargs);
+        printf("[rank %03d] %s", rank, rendered);
+        free(rendered);
+        va_end(vargs);
     }
 }
