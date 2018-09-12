@@ -173,6 +173,8 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         int dimids[ndims];
         NCERR(nc_inq_vardimid(in_file, v, dimids));
 
+        log_message(LOG_DEBUG, "Defining variable %s", name);
+
         int out_v;
         NCERR(nc_def_var(out_file, name, type, ndims, dimids, &out_v));
 
@@ -259,11 +261,15 @@ void check_chunking(char ** in_paths, int n_in) {
 
     NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
     NCERR(nc_inq_nvars(ncid0, &nvars));
+
+    int ncids[n_in];
     
     for (int v=0; v<nvars; ++v) {
 	char varname[NC_MAX_NAME+1];
         int ndims;
 	NCERR(nc_inq_var(ncid0, v, varname, NULL, &ndims, NULL, NULL));
+
+        log_message(LOG_INFO, "Checking chunking of %s", varname);
 
         int storage0;
         size_t chunk0[ndims];
@@ -276,15 +282,15 @@ void check_chunking(char ** in_paths, int n_in) {
 	// fprintf(stdout, "Checking chunking matches for variable \n", varname);
 
         for (int i=1; i<n_in; ++i) {
-            int ncid;
-            NCERR(nc_open(in_paths[i], NC_NOWRITE, &ncid));
+            if (v == 0) NCERR(nc_open(in_paths[i], NC_NOWRITE, &(ncids[i])));
+
             int storage;
             size_t chunk[ndims];
             int shuffle;
             int deflate;
             int deflate_level;
-            NCERR(nc_inq_var_chunking(ncid, v, &storage, chunk));
-            NCERR(nc_inq_var_deflate(ncid, v, &shuffle, &deflate, &deflate_level));
+            NCERR(nc_inq_var_chunking(ncids[i], v, &storage, chunk));
+            NCERR(nc_inq_var_deflate(ncids[i], v, &shuffle, &deflate, &deflate_level));
 
             file_match_check(storage == storage0, in_paths[0], in_paths[i],
                              "'storage' attributes don't match between");
@@ -306,7 +312,7 @@ void check_chunking(char ** in_paths, int n_in) {
                 }
             }
 
-            NCERR(nc_close(ncid));
+            if (v == nvars-1) NCERR(nc_close(ncids[i]));
         }
 
 
@@ -325,6 +331,7 @@ static struct argp_option opts[] = {
     {"no-shuffle", -2, 0, 0, "Force disable shuffle filter (slower)", 6},
     {"verbose", 'v', 0, 0, "Be verbose",7},
     {"quiet", 'q', 0, 0, "Be quiet (no warnings)",8},
+    {"debug", -3, 0, 0, "Debug info",8},
     {0},
 };
 
@@ -359,6 +366,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             break;
         case 'q':
             set_log_level(LOG_ERROR);
+            break;
+        case -3:
+            set_log_level(LOG_DEBUG);
             break;
         default:
             return ARGP_ERR_UNKNOWN;
