@@ -233,7 +233,7 @@ void write_uncompressed_async(
               type, MPI_COMM_WORLD, request);
 }
 
-static void receive_write_uncompressed_async(
+static size_t receive_write_uncompressed_async(
     async_state_t * state,
     MPI_Status status
     ) {
@@ -275,6 +275,10 @@ static void receive_write_uncompressed_async(
         shape[d]  = chunk_data[ndims+d];
     }
 
+    hsize_t block_size_start;
+    herr_t err = H5Dget_chunk_storage_size(state->vars[idx].var_id, offset, &block_size_start);
+    if (err < 0) block_size_start = 0;
+
     // Create selections and write out the data
     hid_t mem_space = H5Screate_simple(ndims, shape, NULL);
     H5ERR(mem_space);
@@ -290,6 +294,12 @@ static void receive_write_uncompressed_async(
 
     H5ERR(H5Sclose(mem_space));
     H5ERR(H5Sclose(data_space));
+
+    hsize_t block_size_end;
+    H5ERR(H5Dget_chunk_storage_size(state->vars[idx].var_id, offset, &block_size_end));
+
+    // Return the change in the block size, in case of partial writes
+    return block_size_end - block_size_start;
 }
 
 
@@ -494,7 +504,7 @@ size_t run_async_writer(
                             receive_close_variable_async(&state, status);
                             break;
                         case TAG_WRITE_FILTER:
-                            receive_write_uncompressed_async(&state, status);
+                            total_size += receive_write_uncompressed_async(&state, status);
                             break;
                         case TAG_VAR_INFO:
                             receive_variable_info_async(&state, status);

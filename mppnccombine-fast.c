@@ -439,8 +439,8 @@ int main(int argc, char ** argv) {
         double t_end = MPI_Wtime();
         double total_size_gb = total_size / pow(1024,3);
 
-        fprintf(stdout, "\nTotal compressed size %.2f GiB | %.2f GiB / sec\n",
-                total_size_gb, total_size_gb/(t_end - t_start));
+        fprintf(stdout, "\nTotal compressed size %.2f GiB | Time %.2fs | %.2f MiB / sec\n",
+                total_size_gb, t_end - t_start, total_size / pow(1024,2) /(t_end - t_start));
     } else {
         int increment = 1;
         int my_file_idx = -1;
