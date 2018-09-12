@@ -113,6 +113,9 @@ void variable_info_async(
     varid_t var,
     size_t ndims,
     uint64_t chunk[],
+    int * deflate,
+    int * deflate_level,
+    int * shuffle,
     int async_writer_rank
     ) {
 
@@ -120,8 +123,17 @@ void variable_info_async(
     MPI_Send(&(var.idx), 1, MPI_INT, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD);
 
-    MPI_Recv(chunk, ndims, MPI_UINT64_T, async_writer_rank,
+    uint64_t varinfo[ndims+3];
+    MPI_Recv(varinfo, ndims+3, MPI_UINT64_T, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    for (int d=0; d<ndims; ++d){
+        chunk[d] = varinfo[d];
+    }
+
+    *deflate = varinfo[ndims];
+    *deflate_level = varinfo[ndims+1];
+    *shuffle = varinfo[ndims+2];
 }
 
 void receive_variable_info_async(
@@ -139,13 +151,46 @@ void receive_variable_info_async(
     int ndims = H5Sget_simple_extent_ndims(space);
     H5ERR(H5Sclose(space));
 
-    unsigned long long chunk[ndims];
+    // Info is [ chunking[], deflate, deflate_level, shuffle ]
+    unsigned long long varinfo[ndims + 3];
     hid_t plist = H5Dget_create_plist(state->vars[idx].var_id);
     H5ERR(plist);
-    H5ERR(H5Pget_chunk(plist, ndims, chunk));
+
+    H5ERR(H5Pget_chunk(plist, ndims, varinfo + 0));
+
+    int nfilters = H5Pget_nfilters(plist);
+    H5ERR(nfilters);
+
+    // Prep the filter info
+    varinfo[ndims]   = 0;
+    varinfo[ndims+1] = 0;
+    varinfo[ndims+2] = 0;
+
+    for (int filter_id=0; filter_id<nfilters; ++filter_id) {
+        unsigned int flags;
+        size_t elements = 4;
+        unsigned values[elements];
+        char name[256];
+        unsigned config;
+        H5Z_filter_t filter = H5Pget_filter(plist, filter_id, &flags,
+                                            &elements, values, sizeof(name), name,
+                                            &config);
+        if (filter == H5Z_FILTER_DEFLATE) {
+            // Store the deflate level
+            varinfo[ndims] = 1;
+            varinfo[ndims+1] = values[0];
+        }
+        if (filter == H5Z_FILTER_SHUFFLE) {
+            // Store the shuffle
+            varinfo[ndims+2] = 1;
+        }
+
+        H5ERR(filter);
+    }
+
     H5ERR(H5Pclose(plist));
 
-    MPI_Send(chunk, ndims, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
+    MPI_Send(varinfo, ndims+3, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
              status.MPI_TAG, MPI_COMM_WORLD);
 }
 

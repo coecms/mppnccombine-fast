@@ -332,12 +332,24 @@ void copy_chunked(const char * filename, int async_writer_rank) {
         char varname[NC_MAX_NAME+1];
         NCERR(nc_inq_varname(ncid, v, varname));
 
+        int shuffle, deflate, deflate_level;
+        NCERR(nc_inq_var_deflate(ncid, v, &shuffle, &deflate, &deflate_level));
+
         // Get a handle to the variable on the writer
         varid_t var = open_variable_async(varname, NC_MAX_NAME+1, async_writer_rank);
 
-        // Get the chunk info
+        // Get the output chunk and compression info
         size_t out_chunk[ndims];
-        variable_info_async(var, ndims, out_chunk, async_writer_rank);
+        int out_deflate;
+        int out_deflate_level;
+        int out_shuffle;
+        variable_info_async(var, ndims, out_chunk, &out_deflate, &out_deflate_level, 
+                            &out_shuffle, async_writer_rank);
+
+        bool filters_match = (shuffle == out_shuffle) && (deflate == out_deflate);
+        if (deflate == 1 && filters_match) {
+            filters_match == deflate_level == out_deflate_level;
+        }
 
         // Offset of this file in the collation
         size_t out_offset[ndims];
@@ -355,13 +367,13 @@ void copy_chunked(const char * filename, int async_writer_rank) {
                            || out_offset[d] + local_size[d] == total_size[d]);
         }
 
-        if (is_aligned) {
-            log_message(LOG_INFO, "Aligned HDF5 copy of %s from %s", varname, filename);
+        if (is_aligned && filters_match) {
+            log_message(LOG_INFO, "Aligned (fast) copy of %s from %s", varname, filename);
             NCERR(nc_close(ncid));
             copy_hdf5_variable_chunks(var, filename, varname, out_offset, local_size, ndims, async_writer_rank);
             NCERR(nc_open(filename, NC_NOWRITE, &ncid));
         } else {
-            log_message(LOG_INFO, "Unaligned (slow) NetCDF4 copy of %s from %s", varname, filename);
+            log_message(LOG_WARNING, "Unaligned or compression change (slow) copy of %s from %s", varname, filename);
             copy_netcdf_variable_chunks(var, ncid, v, ndims, out_chunk, async_writer_rank);
         }
 

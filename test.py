@@ -185,6 +185,7 @@ def test_compression_override(tmpdir):
 
     assert c.a.encoding['complevel'] == 8
     assert c.a.encoding['shuffle'] == False
+    np.testing.assert_array_equal(d.a, c.a)
 
 def test_clobber(tmpdir):
     d = xarray.Dataset(

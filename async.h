@@ -38,6 +38,9 @@ void variable_info_async(
     varid_t var,
     size_t ndims,
     size_t chunk[],
+    int * deflate,
+    int * deflate_level,
+    int * shuffle,
     int async_writer_rank
     );
 
