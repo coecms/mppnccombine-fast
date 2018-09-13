@@ -1,11 +1,11 @@
 CC      = ${COMPILER_ENV} mpicc
 #CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -O0 -traceback
 CFLAGS  = -std=c99 -Wall -Wextra -g -O2
-LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5 -lm
+LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5
 
 ifneq ($(filter raijin%, ${HOSTNAME}),)
     # Setup the Raijin environment
-    COMPILER_ENV = module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2;
+    COMPILER_ENV = module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2 scorep/3.1; ${SCOREP}
     TEST_ENV     = module purge; module load conda openmpi/3.0.1;
 endif
 

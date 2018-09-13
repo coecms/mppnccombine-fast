@@ -31,7 +31,7 @@ void handle_nc_error(int err, const char * file, int line) {
     if (err != 0) {
         const char * message = nc_strerror(err);
 
-        fprintf(stderr, "ERROR in NetCDF %s:%d %d %s\n", file, line, err, message);
+        log_message(LOG_ERROR, "ERROR in NetCDF %s:%d %d %s\n", file, line, err, message);
         MPI_Abort(MPI_COMM_WORLD, err);
     }
 }
@@ -39,7 +39,7 @@ void handle_nc_error(int err, const char * file, int line) {
 // HDF5 error handler
 void handle_h5_error(int err, const char * file, int line) {
     if (err < 0) {
-        fprintf(stderr, "ERROR in HDF5 %s:%d\n", file, line);
+        log_message(LOG_ERROR, "ERROR in HDF5 %s:%d\n", file, line);
         H5Eprint1(stderr);
         MPI_Abort(MPI_COMM_WORLD, err);
     }
@@ -47,7 +47,7 @@ void handle_h5_error(int err, const char * file, int line) {
 
 void handle_c_error(int err, const char * message, const char * file, int line) {
     if (err != 0) {
-        fprintf(stderr, "ERROR %s:%d %s\n", file, line, message);
+        log_message(LOG_ERROR, "ERROR %s:%d %s\n", file, line, message);
         MPI_Abort(MPI_COMM_WORLD, err);
     }
 }
@@ -66,7 +66,7 @@ void log_message(int level, const char * message, ...) {
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         char * rendered;
         vasprintf(&rendered, message, vargs);
-        printf("[rank %03d] %s\n", rank, rendered);
+        fprintf(stderr, "[rank %03d] %s\n", rank, rendered);
         free(rendered);
         va_end(vargs);
     }

@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <mpi.h>
 #include "hdf5.h"
 #include "hdf5_hl.h"
@@ -84,7 +85,7 @@ MPI_Datatype type_nc_to_mpi(nc_type type) {
         case (NC_DOUBLE):
             return MPI_DOUBLE;
         default:
-            fprintf(stderr, "Unknown NetCDF type %d\n", type);
+            log_message(LOG_ERROR, "Unknown NetCDF type %d\n", type);
             MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
@@ -100,7 +101,7 @@ hid_t type_nc_to_h5(nc_type type) {
         case (NC_DOUBLE):
             return H5T_NATIVE_DOUBLE;
         default:
-            fprintf(stderr, "Unknown NetCDF type %d\n", type);
+            log_message(LOG_ERROR, "Unknown NetCDF type %d\n", type);
             MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
@@ -213,7 +214,7 @@ void write_uncompressed_async(
               TAG_WRITE_FILTER, MPI_COMM_WORLD, &(requests[0]));
 
     // Pack chunk information into a vector
-    int chunk_data_count = 2 * ndims;
+    int chunk_data_count = 2 * ndims + 1;
     uint64_t chunk_data[chunk_data_count];
     size_t buffer_count = 1;
     
@@ -223,6 +224,9 @@ void write_uncompressed_async(
 
         buffer_count *= chunk_shape[d];
     }
+
+    chunk_data[2*ndims] = type;
+
     MPI_Isend(chunk_data, chunk_data_count, MPI_UINT64_T, async_writer_rank,
               TAG_CONTINUE, MPI_COMM_WORLD, &(requests[1]));
 
@@ -230,7 +234,7 @@ void write_uncompressed_async(
 
     // Send the buffer - reciever can get the count and type
     MPI_Isend(buffer, buffer_count, type_mpi, async_writer_rank,
-              type, MPI_COMM_WORLD, request);
+              TAG_CONTINUE, MPI_COMM_WORLD, request);
 }
 
 static size_t receive_write_uncompressed_async(
@@ -255,19 +259,21 @@ static size_t receive_write_uncompressed_async(
     MPI_Recv(chunk_data, chunk_data_count, MPI_UINT64_T, status.MPI_SOURCE,
              TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    MPI_Probe(status.MPI_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &probe);
-    nc_type type = probe.MPI_TAG;
+    int type = chunk_data[chunk_data_count - 1];
+
     MPI_Datatype type_mpi = type_nc_to_mpi(type);
+
+    MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &probe);
 
     int buffer_count;
     MPI_Get_count(&probe, type_mpi, &buffer_count);
 
     char buffer[buffer_count * sizeof(double)];
     MPI_Recv(buffer, buffer_count, type_mpi, status.MPI_SOURCE,
-             type, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     // Unpack chunk info
-    int ndims = chunk_data_count / 2;
+    int ndims = (chunk_data_count - 1) / 2;
     hsize_t offset[ndims];
     hsize_t shape[ndims];
     for (int d=0;d<ndims;++d) {
@@ -366,8 +372,12 @@ static size_t receive_write_chunk_async(
     hsize_t offset_[ndims];
     for (int d=0; d<ndims; ++d) {offset_[d] = offset[d];}
 
-    H5ERR(H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
+    int err = (H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
                           offset_, buffer_size, buffer));
+    if (err < 0) {
+        log_message(LOG_ERROR, "var %d %s from %d dims %zu [%zu,%zu,%zu]\n", idx, state->vars[idx].varname, status.MPI_SOURCE, ndims, offset[0], offset[1], offset[2]);
+    }
+    H5ERR(err);
 
     return buffer_size;
 }
@@ -481,44 +491,58 @@ size_t run_async_writer(
         MPI_Request barrier_request;
         MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
 
-        int reached_barrier = 0;
-        MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
+        int reached_barrier = 1;
 
         // Non-collective operations
-        while (!reached_barrier) {
+        // Keeps checking for messages until a barrier has been reached and
+        // there are no waiting messages
+        bool more_messages = true;
+        while (!reached_barrier || more_messages) {
             MPI_Status status;
             int flag;
 
-            // Check for messages more often than barriers
-            for (int j=0; j<10; ++j) {
-                MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
-                if (flag) {
-                    switch(status.MPI_TAG) {
-                        case TAG_WRITE_CHUNK:
-                            total_size += receive_write_chunk_async(&state, status);
-                            break;
-                        case TAG_OPEN_VARIABLE:
-                            receive_open_variable_async(&state, status);
-                            break;
-                        case TAG_CLOSE_VARIABLE:
-                            receive_close_variable_async(&state, status);
-                            break;
-                        case TAG_WRITE_FILTER:
-                            total_size += receive_write_uncompressed_async(&state, status);
-                            break;
-                        case TAG_VAR_INFO:
-                            receive_variable_info_async(&state, status);
-                            break;
-                    }
-                }
+            MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
+
+            more_messages = false;
+
+            // Receive all the writes before closing any variables
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_CHUNK, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                total_size += receive_write_chunk_async(&state, status);
+                more_messages = true;
+                continue;
             }
 
-            MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_FILTER, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                total_size += receive_write_uncompressed_async(&state, status);
+                more_messages = true;
+                continue;
+            }
+
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_OPEN_VARIABLE, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                receive_open_variable_async(&state, status);
+                more_messages = true;
+            }
+
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                receive_close_variable_async(&state, status);
+                more_messages = true;
+            }
+
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_VAR_INFO, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                receive_variable_info_async(&state, status);
+                more_messages = true;
+            }
+
         }
 
         // Collective operations
         MPI_Status status;
-        MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+        MPI_Probe(MPI_ANY_SOURCE, TAG_CLOSE, MPI_COMM_WORLD, &status);
         switch(status.MPI_TAG) {
             case TAG_CLOSE:
                 receive_close_async(&state, status);
