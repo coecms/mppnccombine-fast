@@ -320,7 +320,7 @@ void check_chunking(char ** in_paths, int n_in) {
     NCERR(nc_close(ncid0));
 }
 
-static char doc[] = "Quickly collate MOM output files";
+static char doc[] = "\nQuickly collate MOM output files\n";
 
 static struct argp_option opts[] = {
     {"output", 'o', "FILE", 0, "Output file",1},
@@ -332,12 +332,14 @@ static struct argp_option opts[] = {
     {"verbose", 'v', 0, 0, "Be verbose",7},
     {"quiet", 'q', 0, 0, "Be quiet (no warnings)",8},
     {"debug", -3, 0, 0, "Debug info",8},
+    {"help", '?', 0, 0, "Print this help list",9},
     {0},
 };
 
 static error_t parse_opt(int key, char *arg, struct argp_state * state) {
     struct args_t * args = state->input;
     int err;
+    int rank;
 
     switch(key) {
         case 'o':
@@ -369,6 +371,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
             break;
         case -3:
             set_log_level(LOG_DEBUG);
+            break;
+        case '?':
+            MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+            if (rank == 0) {
+                argp_state_help(state, stderr, ARGP_HELP_USAGE | ARGP_HELP_DOC | ARGP_HELP_LONG);
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Abort(MPI_COMM_WORLD, 0);
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -404,7 +414,12 @@ int main(int argc, char ** argv) {
     args.force = false;
     args.remove = false;
 
-    argp_parse(&argp, argc, argv, 0, &arg_index, &args);
+    unsigned int argp_flags = ARGP_NO_EXIT | ARGP_NO_HELP;
+    if (comm_rank != 0) {
+        argp_flags |= ARGP_SILENT;
+    }
+
+    error_t argp_error = argp_parse(&argp, argc, argv, argp_flags, &arg_index, &args);
     if (args.output == NULL) {
         fprintf(stderr, "ERROR: No output file specified\n");
         exit(-1);
@@ -416,6 +431,10 @@ int main(int argc, char ** argv) {
     if (comm_size < 2) {
         fprintf(stderr, "ERROR: Please run with at least 2 MPI processes\n");
         exit(-1);
+    }
+    if (argp_error != 0) {
+        log_message(LOG_ERROR, "ERROR parsing arguments");
+        MPI_Abort(MPI_COMM_WORLD, argp_error);
     }
 
     const char * in_path = argv[arg_index];
