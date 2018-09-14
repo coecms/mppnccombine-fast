@@ -320,10 +320,11 @@ void check_chunking(char ** in_paths, int n_in) {
     NCERR(nc_close(ncid0));
 }
 
-static char doc[] = "\nQuickly collate MOM output files\n";
+static char doc[] = "\nQuickly collate MOM model files\n\nGathers the INPUT MOM model files (provided e.g. with a shell glob) and joins them along their horizontal dimensions into a single NetCDF file";
 
 static struct argp_option opts[] = {
-    {"output", 'o', "FILE", 0, "Output file",1},
+    {"INPUT", 0, 0, OPTION_DOC, "Input NetCDF file",0},
+    {"output", 'o', "OUTPUT", OPTION_NO_USAGE, "Output NetCDF file",1},
     {"force", 'f', 0, 0, "Combine even if output file present",2},
     {"remove", 'r', 0, 0, "Remove the input files after completion",3},
     {"deflate", 'd', "[0-9]", 0, "Override compression level (slower)", 4},
@@ -331,8 +332,8 @@ static struct argp_option opts[] = {
     {"no-shuffle", -2, 0, 0, "Force disable shuffle filter (slower)", 6},
     {"verbose", 'v', 0, 0, "Be verbose",7},
     {"quiet", 'q', 0, 0, "Be quiet (no warnings)",8},
-    {"debug", -3, 0, 0, "Debug info",8},
-    {"help", '?', 0, 0, "Print this help list",9},
+    {"debug", -3, 0, 0, "Debug info",9},
+    {"help", '?', 0, 0, "Print this help list",10},
     {0},
 };
 
@@ -375,7 +376,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state * state) {
         case '?':
             MPI_Comm_rank(MPI_COMM_WORLD, &rank);
             if (rank == 0) {
-                argp_state_help(state, stderr, ARGP_HELP_USAGE | ARGP_HELP_DOC | ARGP_HELP_LONG);
+                argp_state_help(state, stderr, ARGP_HELP_SHORT_USAGE | ARGP_HELP_DOC | ARGP_HELP_LONG);
             }
             MPI_Barrier(MPI_COMM_WORLD);
             MPI_Abort(MPI_COMM_WORLD, 0);
@@ -391,6 +392,7 @@ static struct argp argp = {
     .parser = parse_opt,
     .options = opts,
     .doc = doc,
+    .args_doc = "--output=OUTPUT INPUT [INPUT ...]",
 };
 
 int main(int argc, char ** argv) {
