@@ -24,6 +24,7 @@
 #include <argp.h>
 #include <math.h>
 #include <mpi.h>
+#include <unistd.h>
 
 #include "error.h"
 #include "async.h"
@@ -32,6 +33,14 @@
 #define TAG_DECOMP 1
 #define TAG_CHUNK 2
 
+
+struct args_t {
+    const char * output;
+    int deflate_level;
+    int shuffle;
+    bool force;
+    bool remove;
+};
 
 // Print diagnostic information about this file's collation
 void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
@@ -106,13 +115,22 @@ void copy_attrs(int ncid_out, int varid_out, int ncid_in, int varid_in, int natt
 
 // Copy NetCDF headers and uncollated variables from file at in_path to file at
 // out_path
-void init(const char * in_path, const char * out_path) {
+void init(const char * in_path, const char * out_path, const struct args_t * args) {
     int in_file;
     int out_file;
 
     // Open both files
     NCERR(nc_open(in_path, NC_NOWRITE, &in_file));
-    NCERR(nc_create(out_path, NC_NETCDF4 | NC_CLOBBER, &out_file));
+
+    int out_flags = NC_NETCDF4;
+    if (!args->force) out_flags |= NC_NOCLOBBER;
+    int err = nc_create(out_path, out_flags, &out_file);
+    if (err == -35) {
+        log_message(LOG_ERROR, "ERROR: Output file '%s' already exists (try --force)", out_path);
+        MPI_Abort(MPI_COMM_WORLD, err);
+    } else {
+        NCERR(err);
+    }
 
     int ndims;
     int nvars;
@@ -155,6 +173,8 @@ void init(const char * in_path, const char * out_path) {
         int dimids[ndims];
         NCERR(nc_inq_vardimid(in_file, v, dimids));
 
+        log_message(LOG_DEBUG, "Defining variable %s", name);
+
         int out_v;
         NCERR(nc_def_var(out_file, name, type, ndims, dimids, &out_v));
 
@@ -172,6 +192,11 @@ void init(const char * in_path, const char * out_path) {
             int deflate;
             int deflate_level;
             NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
+
+            // Option to override compression
+            if (args->deflate_level != -1) deflate_level = args->deflate_level; 
+            if (args->shuffle != -1) shuffle = args->shuffle; 
+
             if (shuffle || deflate) {
                 NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
             }
@@ -182,7 +207,7 @@ void init(const char * in_path, const char * out_path) {
 
         // If the field is not collated copy it now
         if (! is_collated(in_file, v)) {
-            fprintf(stdout, "\tUncollated NetCDF copy of %s\n", name);
+            log_message(LOG_INFO, "Uncollated NetCDF copy of %s", name);
             copy_netcdf(out_file, out_v, in_file, v);
         }
     }
@@ -212,7 +237,7 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
         if (storage == NC_CONTIGUOUS) {
             if (is_collated(out_nc4, v)) {
                 for (int i=0; i<n_in; ++i) {
-                    fprintf(stdout, "\tNetCDF copy of %s from %s\n", varname, in_paths[i]);
+                    log_message(LOG_INFO, "NetCDF copy of %s from %s", varname, in_paths[i]);
                     int in_nc4;
                     NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
                     copy_netcdf(out_nc4, v, in_nc4, v);
@@ -236,11 +261,15 @@ void check_chunking(char ** in_paths, int n_in) {
 
     NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
     NCERR(nc_inq_nvars(ncid0, &nvars));
+
+    int ncids[n_in];
     
     for (int v=0; v<nvars; ++v) {
 	char varname[NC_MAX_NAME+1];
         int ndims;
 	NCERR(nc_inq_var(ncid0, v, varname, NULL, &ndims, NULL, NULL));
+
+        log_message(LOG_INFO, "Checking chunking of %s", varname);
 
         int storage0;
         size_t chunk0[ndims];
@@ -253,15 +282,15 @@ void check_chunking(char ** in_paths, int n_in) {
 	// fprintf(stdout, "Checking chunking matches for variable \n", varname);
 
         for (int i=1; i<n_in; ++i) {
-            int ncid;
-            NCERR(nc_open(in_paths[i], NC_NOWRITE, &ncid));
+            if (v == 0) NCERR(nc_open(in_paths[i], NC_NOWRITE, &(ncids[i])));
+
             int storage;
             size_t chunk[ndims];
             int shuffle;
             int deflate;
             int deflate_level;
-            NCERR(nc_inq_var_chunking(ncid, v, &storage, chunk));
-            NCERR(nc_inq_var_deflate(ncid, v, &shuffle, &deflate, &deflate_level));
+            NCERR(nc_inq_var_chunking(ncids[i], v, &storage, chunk));
+            NCERR(nc_inq_var_deflate(ncids[i], v, &shuffle, &deflate, &deflate_level));
 
             file_match_check(storage == storage0, in_paths[0], in_paths[i],
                              "'storage' attributes don't match between");
@@ -283,7 +312,7 @@ void check_chunking(char ** in_paths, int n_in) {
                 }
             }
 
-            NCERR(nc_close(ncid));
+            if (v == nvars-1) NCERR(nc_close(ncids[i]));
         }
 
 
@@ -291,23 +320,66 @@ void check_chunking(char ** in_paths, int n_in) {
     NCERR(nc_close(ncid0));
 }
 
-struct args_t {
-    const char * output;
-};
-
-static char doc[] = "Quickly collate MOM output files";
+static char doc[] = "\nQuickly collate MOM model files\n\nGathers the INPUT MOM model files (provided e.g. with a shell glob) and joins them along their horizontal dimensions into a single NetCDF file";
 
 static struct argp_option opts[] = {
-    {"output", 'o', "FILE", 0, "Output file"},
+    {"INPUT", 0, 0, OPTION_DOC, "Input NetCDF file",0},
+    {"output", 'o', "OUTPUT", OPTION_NO_USAGE, "Output NetCDF file",1},
+    {"force", 'f', 0, 0, "Combine even if output file present",2},
+    {"remove", 'r', 0, 0, "Remove the input files after completion",3},
+    {"deflate", 'd', "[0-9]", 0, "Override compression level (slower)", 4},
+    {"shuffle", -1, 0, 0, "Force enable shuffle filter (slower)", 5},
+    {"no-shuffle", -2, 0, 0, "Force disable shuffle filter (slower)", 6},
+    {"verbose", 'v', 0, 0, "Be verbose",7},
+    {"quiet", 'q', 0, 0, "Be quiet (no warnings)",8},
+    {"debug", -3, 0, 0, "Debug info",9},
+    {"help", '?', 0, 0, "Print this help list",10},
     {0},
 };
 
 static error_t parse_opt(int key, char *arg, struct argp_state * state) {
     struct args_t * args = state->input;
+    int err;
+    int rank;
 
     switch(key) {
         case 'o':
             args->output = arg;
+            break;
+        case 'd':
+            err = sscanf(arg, "%d", &(args->deflate_level));
+            if (err != 1) CERR(-1, "Bad deflate value");
+            if (args->deflate_level < 0) CERR(-1, "Bad deflate value");
+            if (args->deflate_level > 9) CERR(-1, "Bad deflate value");
+            break;
+        case -1:
+            args->shuffle = 1;
+            break;
+        case -2:
+            args->shuffle = 0;
+            break;
+        case 'f':
+            args->force = true;
+            break;
+        case 'r':
+            args->remove = true;
+            break;
+        case 'v':
+            set_log_level(LOG_INFO);
+            break;
+        case 'q':
+            set_log_level(LOG_ERROR);
+            break;
+        case -3:
+            set_log_level(LOG_DEBUG);
+            break;
+        case '?':
+            MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+            if (rank == 0) {
+                argp_state_help(state, stderr, ARGP_HELP_SHORT_USAGE | ARGP_HELP_DOC | ARGP_HELP_LONG);
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Abort(MPI_COMM_WORLD, 0);
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -320,10 +392,12 @@ static struct argp argp = {
     .parser = parse_opt,
     .options = opts,
     .doc = doc,
+    .args_doc = "--output=OUTPUT INPUT [INPUT ...]",
 };
 
 int main(int argc, char ** argv) {
     MPI_Init(&argc, &argv);
+    set_log_level(LOG_WARNING);
 
     int comm_rank;
     int comm_size;
@@ -337,8 +411,17 @@ int main(int argc, char ** argv) {
 
     int arg_index;
     struct args_t args = {0};
+    args.deflate_level = -1;
+    args.shuffle = -1;
+    args.force = false;
+    args.remove = false;
 
-    argp_parse(&argp, argc, argv, 0, &arg_index, &args);
+    unsigned int argp_flags = ARGP_NO_EXIT | ARGP_NO_HELP;
+    if (comm_rank != 0) {
+        argp_flags |= ARGP_SILENT;
+    }
+
+    error_t argp_error = argp_parse(&argp, argc, argv, argp_flags, &arg_index, &args);
     if (args.output == NULL) {
         fprintf(stderr, "ERROR: No output file specified\n");
         exit(-1);
@@ -351,6 +434,10 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "ERROR: Please run with at least 2 MPI processes\n");
         exit(-1);
     }
+    if (argp_error != 0) {
+        log_message(LOG_ERROR, "ERROR parsing arguments");
+        MPI_Abort(MPI_COMM_WORLD, argp_error);
+    }
 
     const char * in_path = argv[arg_index];
     const char * out_path = args.output;
@@ -362,7 +449,7 @@ int main(int argc, char ** argv) {
 
         // Copy metadata and un-collated variables
         fprintf(stdout, "\nCopying non-collated variables\n");
-        init(in_path, out_path);
+        init(in_path, out_path, &args);
         // Copy contiguous variables using NetCDF
         fprintf(stdout, "\nCopying contiguous variables\n");
         copy_contiguous(out_path, argv+arg_index, argc-arg_index);
@@ -373,11 +460,13 @@ int main(int argc, char ** argv) {
         double t_end = MPI_Wtime();
         double total_size_gb = total_size / pow(1024,3);
 
-        fprintf(stdout, "\nTotal compressed size %.2f GiB | %.2f GiB / sec\n",
-                total_size_gb, total_size_gb/(t_end - t_start));
+        fprintf(stdout, "\nTotal compressed size %.2f GiB | Time %.2fs | %.2f MiB / sec\n",
+                total_size_gb, t_end - t_start, total_size / pow(1024,2) /(t_end - t_start));
     } else {
         int increment = 1;
         int my_file_idx = -1;
+
+        log_message(LOG_DEBUG, "Starting read");
 
         // Atomic post-addition of increment to current_file_idx
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
@@ -393,6 +482,16 @@ int main(int argc, char ** argv) {
             MPI_Win_unlock(0, current_file_win);
         }
         close_async(0);
+        log_message(LOG_DEBUG, "Finished read");
+    }
+
+    if (comm_rank == writer_rank && args.remove) {
+        log_message(LOG_INFO, "Cleaning inputs");
+        int my_file_idx = 0;
+        while (my_file_idx < argc-arg_index) {
+            unlink(argv[arg_index+my_file_idx]);
+            my_file_idx++;
+        }
     }
 
     MPI_Win_free(&current_file_win);

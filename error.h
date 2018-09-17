@@ -29,8 +29,16 @@ void handle_nc_error(int err, const char * file, int line);
 #define H5ERR(x) handle_h5_error(x, __FILE__, __LINE__)
 void handle_h5_error(int err, const char * file, int line);
 
-#define CERR(x) handle_c_error(x, __FILE__, __LINE__)
-void handle_c_error(int err, const char * file, int line);
+#define CERR(x, message) handle_c_error(x, message, __FILE__, __LINE__)
+void handle_c_error(int err, const char * message, const char * file, int line);
+
+#define LOG_DEBUG 4
+#define LOG_INFO 3
+#define LOG_WARNING 2
+#define LOG_ERROR 1
+
+void set_log_level(int level);
+void log_message(int level, const char * message, ...);
 
 #ifdef __cplusplus
 }

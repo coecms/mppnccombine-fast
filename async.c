@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <mpi.h>
 #include "hdf5.h"
 #include "hdf5_hl.h"
@@ -84,7 +85,7 @@ MPI_Datatype type_nc_to_mpi(nc_type type) {
         case (NC_DOUBLE):
             return MPI_DOUBLE;
         default:
-            fprintf(stderr, "Unknown NetCDF type %d\n", type);
+            log_message(LOG_ERROR, "Unknown NetCDF type %d\n", type);
             MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
@@ -100,7 +101,7 @@ hid_t type_nc_to_h5(nc_type type) {
         case (NC_DOUBLE):
             return H5T_NATIVE_DOUBLE;
         default:
-            fprintf(stderr, "Unknown NetCDF type %d\n", type);
+            log_message(LOG_ERROR, "Unknown NetCDF type %d\n", type);
             MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
@@ -113,6 +114,9 @@ void variable_info_async(
     varid_t var,
     size_t ndims,
     uint64_t chunk[],
+    int * deflate,
+    int * deflate_level,
+    int * shuffle,
     int async_writer_rank
     ) {
 
@@ -120,8 +124,17 @@ void variable_info_async(
     MPI_Send(&(var.idx), 1, MPI_INT, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD);
 
-    MPI_Recv(chunk, ndims, MPI_UINT64_T, async_writer_rank,
+    uint64_t varinfo[ndims+3];
+    MPI_Recv(varinfo, ndims+3, MPI_UINT64_T, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    for (int d=0; d<ndims; ++d){
+        chunk[d] = varinfo[d];
+    }
+
+    *deflate = varinfo[ndims];
+    *deflate_level = varinfo[ndims+1];
+    *shuffle = varinfo[ndims+2];
 }
 
 void receive_variable_info_async(
@@ -139,13 +152,46 @@ void receive_variable_info_async(
     int ndims = H5Sget_simple_extent_ndims(space);
     H5ERR(H5Sclose(space));
 
-    unsigned long long chunk[ndims];
+    // Info is [ chunking[], deflate, deflate_level, shuffle ]
+    unsigned long long varinfo[ndims + 3];
     hid_t plist = H5Dget_create_plist(state->vars[idx].var_id);
     H5ERR(plist);
-    H5ERR(H5Pget_chunk(plist, ndims, chunk));
+
+    H5ERR(H5Pget_chunk(plist, ndims, varinfo + 0));
+
+    int nfilters = H5Pget_nfilters(plist);
+    H5ERR(nfilters);
+
+    // Prep the filter info
+    varinfo[ndims]   = 0;
+    varinfo[ndims+1] = 0;
+    varinfo[ndims+2] = 0;
+
+    for (int filter_id=0; filter_id<nfilters; ++filter_id) {
+        unsigned int flags;
+        size_t elements = 4;
+        unsigned values[elements];
+        char name[256];
+        unsigned config;
+        H5Z_filter_t filter = H5Pget_filter(plist, filter_id, &flags,
+                                            &elements, values, sizeof(name), name,
+                                            &config);
+        if (filter == H5Z_FILTER_DEFLATE) {
+            // Store the deflate level
+            varinfo[ndims] = 1;
+            varinfo[ndims+1] = values[0];
+        }
+        if (filter == H5Z_FILTER_SHUFFLE) {
+            // Store the shuffle
+            varinfo[ndims+2] = 1;
+        }
+
+        H5ERR(filter);
+    }
+
     H5ERR(H5Pclose(plist));
 
-    MPI_Send(chunk, ndims, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
+    MPI_Send(varinfo, ndims+3, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
              status.MPI_TAG, MPI_COMM_WORLD);
 }
 
@@ -168,7 +214,7 @@ void write_uncompressed_async(
               TAG_WRITE_FILTER, MPI_COMM_WORLD, &(requests[0]));
 
     // Pack chunk information into a vector
-    int chunk_data_count = 2 * ndims;
+    int chunk_data_count = 2 * ndims + 1;
     uint64_t chunk_data[chunk_data_count];
     size_t buffer_count = 1;
     
@@ -178,6 +224,9 @@ void write_uncompressed_async(
 
         buffer_count *= chunk_shape[d];
     }
+
+    chunk_data[2*ndims] = type;
+
     MPI_Isend(chunk_data, chunk_data_count, MPI_UINT64_T, async_writer_rank,
               TAG_CONTINUE, MPI_COMM_WORLD, &(requests[1]));
 
@@ -185,10 +234,10 @@ void write_uncompressed_async(
 
     // Send the buffer - reciever can get the count and type
     MPI_Isend(buffer, buffer_count, type_mpi, async_writer_rank,
-              type, MPI_COMM_WORLD, request);
+              TAG_CONTINUE, MPI_COMM_WORLD, request);
 }
 
-static void receive_write_uncompressed_async(
+static size_t receive_write_uncompressed_async(
     async_state_t * state,
     MPI_Status status
     ) {
@@ -210,25 +259,31 @@ static void receive_write_uncompressed_async(
     MPI_Recv(chunk_data, chunk_data_count, MPI_UINT64_T, status.MPI_SOURCE,
              TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    MPI_Probe(status.MPI_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &probe);
-    nc_type type = probe.MPI_TAG;
+    int type = chunk_data[chunk_data_count - 1];
+
     MPI_Datatype type_mpi = type_nc_to_mpi(type);
+
+    MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &probe);
 
     int buffer_count;
     MPI_Get_count(&probe, type_mpi, &buffer_count);
 
     char buffer[buffer_count * sizeof(double)];
     MPI_Recv(buffer, buffer_count, type_mpi, status.MPI_SOURCE,
-             type, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     // Unpack chunk info
-    int ndims = chunk_data_count / 2;
+    int ndims = (chunk_data_count - 1) / 2;
     hsize_t offset[ndims];
     hsize_t shape[ndims];
     for (int d=0;d<ndims;++d) {
         offset[d] = chunk_data[d];
         shape[d]  = chunk_data[ndims+d];
     }
+
+    hsize_t block_size_start;
+    herr_t err = H5Dget_chunk_storage_size(state->vars[idx].var_id, offset, &block_size_start);
+    if (err < 0) block_size_start = 0;
 
     // Create selections and write out the data
     hid_t mem_space = H5Screate_simple(ndims, shape, NULL);
@@ -245,6 +300,12 @@ static void receive_write_uncompressed_async(
 
     H5ERR(H5Sclose(mem_space));
     H5ERR(H5Sclose(data_space));
+
+    hsize_t block_size_end;
+    H5ERR(H5Dget_chunk_storage_size(state->vars[idx].var_id, offset, &block_size_end));
+
+    // Return the change in the block size, in case of partial writes
+    return block_size_end - block_size_start;
 }
 
 
@@ -311,8 +372,12 @@ static size_t receive_write_chunk_async(
     hsize_t offset_[ndims];
     for (int d=0; d<ndims; ++d) {offset_[d] = offset[d];}
 
-    H5ERR(H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
+    int err = (H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
                           offset_, buffer_size, buffer));
+    if (err < 0) {
+        log_message(LOG_ERROR, "var %d %s from %d dims %zu [%zu,%zu,%zu]\n", idx, state->vars[idx].varname, status.MPI_SOURCE, ndims, offset[0], offset[1], offset[2]);
+    }
+    H5ERR(err);
 
     return buffer_size;
 }
@@ -426,44 +491,58 @@ size_t run_async_writer(
         MPI_Request barrier_request;
         MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
 
-        int reached_barrier = 0;
-        MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
+        int reached_barrier = 1;
 
         // Non-collective operations
-        while (!reached_barrier) {
+        // Keeps checking for messages until a barrier has been reached and
+        // there are no waiting messages
+        bool more_messages = true;
+        while (!reached_barrier || more_messages) {
             MPI_Status status;
             int flag;
 
-            // Check for messages more often than barriers
-            for (int j=0; j<10; ++j) {
-                MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
-                if (flag) {
-                    switch(status.MPI_TAG) {
-                        case TAG_WRITE_CHUNK:
-                            total_size += receive_write_chunk_async(&state, status);
-                            break;
-                        case TAG_OPEN_VARIABLE:
-                            receive_open_variable_async(&state, status);
-                            break;
-                        case TAG_CLOSE_VARIABLE:
-                            receive_close_variable_async(&state, status);
-                            break;
-                        case TAG_WRITE_FILTER:
-                            receive_write_uncompressed_async(&state, status);
-                            break;
-                        case TAG_VAR_INFO:
-                            receive_variable_info_async(&state, status);
-                            break;
-                    }
-                }
+            MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
+
+            more_messages = false;
+
+            // Receive all the writes before closing any variables
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_CHUNK, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                total_size += receive_write_chunk_async(&state, status);
+                more_messages = true;
+                continue;
             }
 
-            MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_FILTER, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                total_size += receive_write_uncompressed_async(&state, status);
+                more_messages = true;
+                continue;
+            }
+
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_OPEN_VARIABLE, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                receive_open_variable_async(&state, status);
+                more_messages = true;
+            }
+
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                receive_close_variable_async(&state, status);
+                more_messages = true;
+            }
+
+            MPI_Iprobe(MPI_ANY_SOURCE, TAG_VAR_INFO, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                receive_variable_info_async(&state, status);
+                more_messages = true;
+            }
+
         }
 
         // Collective operations
         MPI_Status status;
-        MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+        MPI_Probe(MPI_ANY_SOURCE, TAG_CLOSE, MPI_COMM_WORLD, &status);
         switch(status.MPI_TAG) {
             case TAG_CLOSE:
                 receive_close_async(&state, status);
