@@ -50,3 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Executable
+mppnccombine-fast
+
+# Temporary python stuff
+.pytest_cache
