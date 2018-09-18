@@ -23,6 +23,7 @@ import numpy as np
 import netCDF4
 import pytest
 import os
+import glob
 
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
@@ -224,3 +225,19 @@ def test_clean(tmpdir):
     assert not os.path.isfile(infiles[0])
     assert not os.path.isfile(infiles[1])
     assert os.path.isfile(outpath)
+
+def test_1degree(tmpdir):
+
+    # This test dataset is masked, has a missing tile, as there is
+    # no data in that tile, and has inconsistent chunk sizes
+    testdatadir = os.path.join('test_data', 'output_1deg_masked')
+
+    infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath)
+
+    # Open file collated by mppnccombine
+    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
+
+    assert d.equals(c)
