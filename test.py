@@ -25,6 +25,33 @@ import pytest
 import os
 import glob
 
+# Global variables
+
+# This test dataset is masked, has a missing tile, as there is
+# no data in that tile, and has inconsistent chunk sizes
+testdir = 'test_data'
+testdatadir = os.path.join(testdir, 'output_1deg_masked')
+infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
+
+def run_nccopy(options, outdir):
+    try:
+        for f in infiles:
+            fout = os.path.join(testdir,testdatadir+"_"+outdir,os.path.basename(f))
+            s = subprocess.check_output(
+                    ['nccopy'] + options + [f] + [fout],
+                    stderr=subprocess.STDOUT)
+            print(s.decode('utf-8'))
+    except subprocess.CalledProcessError as e:
+        print(e.stdout.decode('utf-8'))
+        raise
+
+
+def setup_module(module):
+    print ("setup_module      module:%s" % module.__name__)
+    print ("Python version: {}".format(sys.version))
+
+    run_nccopy(['-3'],'nc3')
+
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
     try:
@@ -228,14 +255,29 @@ def test_clean(tmpdir):
 
 def test_1degree(tmpdir):
 
-    # This test dataset is masked, has a missing tile, as there is
-    # no data in that tile, and has inconsistent chunk sizes
-    testdatadir = os.path.join('test_data', 'output_1deg_masked')
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath)
+
+    # Open file collated by mppnccombine
+    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
+
+    assert d.equals(c)
+
+def test_1degree_nc3(tmpdir):
+
+    testdatadir = testdatadir + "_nc3"
 
     infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
 
     outpath = tmpdir.join('out.nc')
-    c = run_collate(infiles, outpath)
+    c = run_collate(infiles, outpath, args=['-d','5'])
+
+    # Open file collated by mppnccombine
+    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
+
+    assert d.equals(c)
+
+    c = run_collate(infiles, outpath, args=['-d','5','--shuffle'])
 
     # Open file collated by mppnccombine
     d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
