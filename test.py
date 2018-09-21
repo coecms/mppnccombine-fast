@@ -24,19 +24,12 @@ import netCDF4
 import pytest
 import os
 import glob
+import sys
 
-# Global variables
-
-# This test dataset is masked, has a missing tile, as there is
-# no data in that tile, and has inconsistent chunk sizes
-testdir = 'test_data'
-testdatadir = os.path.join(testdir, 'output_1deg_masked')
-infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
-
-def run_nccopy(options, outdir):
+def run_nccopy(options, infiles, outdir):
     try:
         for f in infiles:
-            fout = os.path.join(testdir,testdatadir+"_"+outdir,os.path.basename(f))
+            fout = os.path.join(outdir,os.path.basename(f))
             s = subprocess.check_output(
                     ['nccopy'] + options + [f] + [fout],
                     stderr=subprocess.STDOUT)
@@ -44,13 +37,6 @@ def run_nccopy(options, outdir):
     except subprocess.CalledProcessError as e:
         print(e.stdout.decode('utf-8'))
         raise
-
-
-def setup_module(module):
-    print ("setup_module      module:%s" % module.__name__)
-    print ("Python version: {}".format(sys.version))
-
-    run_nccopy(['-3'],'nc3')
 
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
@@ -62,7 +48,7 @@ def run_collate(inputs, output, np=2, args=[]):
     except subprocess.CalledProcessError as e:
         print(e.stdout.decode('utf-8'))
         raise
-    return xarray.open_dataset(str(output), engine='netcdf4')
+    return xarray.open_dataset(str(output), engine='netcdf4', decode_times=False)
 
 def split_dataset(data, split):
     out = []
@@ -255,31 +241,41 @@ def test_clean(tmpdir):
 
 def test_1degree(tmpdir):
 
-    outpath = tmpdir.join('out.nc')
-    c = run_collate(infiles, outpath)
-
-    # Open file collated by mppnccombine
-    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
-
-    assert d.equals(c)
-
-def test_1degree_nc3(tmpdir):
-
-    testdatadir = testdatadir + "_nc3"
+    # This test dataset is masked, has a missing tile, as there is
+    # no data in that tile, and has inconsistent chunk sizes
+    testdir = 'test_data'
+    testdatadir = os.path.join(testdir, 'output_1deg_masked')
 
     infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
 
     outpath = tmpdir.join('out.nc')
-    c = run_collate(infiles, outpath, args=['-d','5'])
+    c = run_collate(infiles, outpath)
 
     # Open file collated by mppnccombine
-    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
+    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'),decode_times=False)
 
     assert d.equals(c)
 
-    c = run_collate(infiles, outpath, args=['-d','5','--shuffle'])
+    # Convert files to netCDF Classic format and test
+    testdir = os.path.join(tmpdir,testdatadir+"_nc3")
+    os.makedirs(testdir)
+    run_nccopy(['-3'],infiles,testdir)
 
-    # Open file collated by mppnccombine
-    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
+    infiles = glob.glob(os.path.join(testdir,'ocean_month.nc.????'))
 
+    # No compression
+    outpath = tmpdir.join('out_nc3.nc')
+    c = run_collate(infiles, outpath, args=['-q','--force'])
+
+    assert d.equals(c)
+
+    # Compression
+    outpath = tmpdir.join('out_nc3_d5.nc')
+    c = run_collate(infiles, outpath, args=['-q','-d','5','--force'])
+
+    assert d.equals(c)
+
+    # Compression + shuffle
+    outpath = tmpdir.join('out_d3_d5_shuff.nc')
+    c = run_collate(infiles, outpath, args=['-q','-d','5','--force','--shuffle'])
     assert d.equals(c)
