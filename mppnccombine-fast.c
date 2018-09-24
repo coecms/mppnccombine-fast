@@ -228,24 +228,26 @@ void copy_contiguous(const char * out_path, char ** in_paths, int n_in) {
     int nvars;
     NCERR(nc_inq_nvars(out_nc4, &nvars));
 
-    for (int v=0; v<nvars; ++v) {
-        // Check the metadata of the output file to see if this variable is contiguous
-        char varname[NC_MAX_NAME+1];
-        NCERR(nc_inq_varname(out_nc4, v, varname));
-        int storage;
-        NCERR(nc_inq_var_chunking(out_nc4, v, &storage, NULL));
-        if (storage == NC_CONTIGUOUS) {
-            if (is_collated(out_nc4, v)) {
-                for (int i=0; i<n_in; ++i) {
-                    log_message(LOG_INFO, "NetCDF copy of %s from %s", varname, in_paths[i]);
-                    int in_nc4;
-                    NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
-                    copy_netcdf(out_nc4, v, in_nc4, v);
-                    NCERR(nc_close(in_nc4));
-                }
+    for (int i=0; i<n_in; ++i) {
+        int in_nc4;
+        NCERR(nc_open(in_paths[i], NC_NOWRITE, &in_nc4));
+
+        for (int v=0; v<nvars; ++v) {
+            // Check the metadata of the output file to see if this variable is contiguous
+            char varname[NC_MAX_NAME+1];
+            NCERR(nc_inq_varname(out_nc4, v, varname));
+            int storage;
+            NCERR(nc_inq_var_chunking(in_nc4, v, &storage, NULL));
+
+            if (storage == NC_CONTIGUOUS && is_collated(out_nc4, v)) {
+                log_message(LOG_INFO, "NetCDF copy of %s from %s", varname, in_paths[i]);
+                copy_netcdf(out_nc4, v, in_nc4, v);
             }
         }
+
+        NCERR(nc_close(in_nc4));
     }
+
     NCERR(nc_close(out_nc4));
 }
 
@@ -254,70 +256,6 @@ void file_match_check(bool test, const char * filea, const char * fileb, const c
         fprintf(stderr, "ERROR: %s <%s> <%s>\n", message, filea, fileb);
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
-}
-
-void check_chunking(char ** in_paths, int n_in) {
-    int ncid0, nvars;
-
-    NCERR(nc_open(in_paths[0], NC_NOWRITE, &ncid0));
-    NCERR(nc_inq_nvars(ncid0, &nvars));
-
-    int ncids[n_in];
-    
-    for (int v=0; v<nvars; ++v) {
-	char varname[NC_MAX_NAME+1];
-        int ndims;
-	NCERR(nc_inq_var(ncid0, v, varname, NULL, &ndims, NULL, NULL));
-
-        log_message(LOG_INFO, "Checking chunking of %s", varname);
-
-        int storage0;
-        size_t chunk0[ndims];
-        int shuffle0;
-        int deflate0;
-        int deflate_level0;
-        NCERR(nc_inq_var_chunking(ncid0, v, &storage0, chunk0));
-        NCERR(nc_inq_var_deflate(ncid0, v, &shuffle0, &deflate0, &deflate_level0));
-
-	// fprintf(stdout, "Checking chunking matches for variable \n", varname);
-
-        for (int i=1; i<n_in; ++i) {
-            if (v == 0) NCERR(nc_open(in_paths[i], NC_NOWRITE, &(ncids[i])));
-
-            int storage;
-            size_t chunk[ndims];
-            int shuffle;
-            int deflate;
-            int deflate_level;
-            NCERR(nc_inq_var_chunking(ncids[i], v, &storage, chunk));
-            NCERR(nc_inq_var_deflate(ncids[i], v, &shuffle, &deflate, &deflate_level));
-
-            file_match_check(storage == storage0, in_paths[0], in_paths[i],
-                             "'storage' attributes don't match between");
-            file_match_check(shuffle == shuffle0, in_paths[0], in_paths[i],
-                             "'shuffle' attributes don't match between");
-            file_match_check(deflate == deflate0, in_paths[0], in_paths[i],
-                             "'deflate' attributes don't match between");
-            file_match_check(deflate_level == deflate_level0, in_paths[0], in_paths[i],
-                             "'deflate_level' attributes don't match between");
-
-            if (storage == NC_CHUNKED) {
-                for (int d=0; d<ndims; ++d){
-
-		  if (! chunk[d] == chunk0[d]) {
-		    fprintf(stderr,"Incompatible chunking for variable %s in %s: %zd - %zd",
-			    varname, in_paths[i], chunk[d], chunk0[d]);
-		    exit(1);
-		  }
-                }
-            }
-
-            if (v == nvars-1) NCERR(nc_close(ncids[i]));
-        }
-
-
-    }
-    NCERR(nc_close(ncid0));
 }
 
 static char doc[] = "\nQuickly collate MOM model files\n\nGathers the INPUT MOM model files (provided e.g. with a shell glob) and joins them along their horizontal dimensions into a single NetCDF file";
@@ -445,8 +383,6 @@ int main(int argc, char ** argv) {
     int writer_rank = 0;
 
     if (comm_rank == writer_rank) {
-        check_chunking(argv+arg_index, argc-arg_index);
-
         // Copy metadata and un-collated variables
         fprintf(stdout, "\nCopying non-collated variables\n");
         init(in_path, out_path, &args);
