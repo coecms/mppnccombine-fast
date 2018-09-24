@@ -26,12 +26,23 @@
 #include "netcdf.h"
 #include "mpi.h"
 
+#include <unistd.h>
+#include <execinfo.h>
+
+void print_backtrace(void) {
+    void * stack[10];
+    size_t size = backtrace(stack, 10);
+
+    backtrace_symbols_fd(stack, size, STDERR_FILENO);
+}
+
 // NetCDF error handler
 void handle_nc_error(int err, const char * file, int line) {
     if (err != 0) {
         const char * message = nc_strerror(err);
 
         log_message(LOG_ERROR, "ERROR in NetCDF %s:%d %d %s\n", file, line, err, message);
+        print_backtrace();
         MPI_Abort(MPI_COMM_WORLD, err);
     }
 }
@@ -41,6 +52,7 @@ void handle_h5_error(int err, const char * file, int line) {
     if (err < 0) {
         log_message(LOG_ERROR, "ERROR in HDF5 %s:%d\n", file, line);
         H5Eprint1(stderr);
+        print_backtrace();
         MPI_Abort(MPI_COMM_WORLD, err);
     }
 }
@@ -48,6 +60,7 @@ void handle_h5_error(int err, const char * file, int line) {
 void handle_c_error(int err, const char * message, const char * file, int line) {
     if (err != 0) {
         log_message(LOG_ERROR, "ERROR %s:%d %s\n", file, line, message);
+        print_backtrace();
         MPI_Abort(MPI_COMM_WORLD, err);
     }
 }
