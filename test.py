@@ -24,6 +24,19 @@ import netCDF4
 import pytest
 import os
 import glob
+import sys
+
+def run_nccopy(options, infiles, outdir):
+    try:
+        for f in infiles:
+            fout = os.path.join(outdir,os.path.basename(f))
+            s = subprocess.check_output(
+                    ['nccopy'] + options + [f] + [fout],
+                    stderr=subprocess.STDOUT)
+            print(s.decode('utf-8'))
+    except subprocess.CalledProcessError as e:
+        print(e.stdout.decode('utf-8'))
+        raise
 
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
@@ -35,7 +48,7 @@ def run_collate(inputs, output, np=2, args=[]):
     except subprocess.CalledProcessError as e:
         print(e.stdout.decode('utf-8'))
         raise
-    return xarray.open_dataset(str(output), engine='netcdf4')
+    return xarray.open_dataset(str(output), engine='netcdf4', decode_times=False)
 
 def split_dataset(data, split):
     out = []
@@ -164,11 +177,11 @@ def test_different_compression(tmpdir):
 
     outpath = tmpdir.join('out.nc')
 
-    # Fails because of different compressions
-    with pytest.raises(subprocess.CalledProcessError) as errinfo:
-        c = run_collate(infiles, outpath)
+    c = run_collate(infiles, outpath)
 
-    assert "attributes don't match" in errinfo.value.output.decode()
+    np.testing.assert_array_equal(d.a, c.a)
+    np.testing.assert_array_equal(d.x, c.x)
+
 
 def test_compression_override(tmpdir):
     d = xarray.Dataset(
@@ -230,14 +243,53 @@ def test_1degree(tmpdir):
 
     # This test dataset is masked, has a missing tile, as there is
     # no data in that tile, and has inconsistent chunk sizes
-    testdatadir = os.path.join('test_data', 'output_1deg_masked')
+    testdir = 'test_data'
+    testdatadir = os.path.join(testdir, 'output_1deg_masked')
 
     infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
 
+    # Open file collated by mppnccombine
+    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'),decode_times=False)
+
+    # No compression
     outpath = tmpdir.join('out.nc')
     c = run_collate(infiles, outpath)
 
+    assert d.equals(c)
+
+    # Compression + shuffle
+    outpath = tmpdir.join('out_shuff.nc')
+    c = run_collate(infiles, outpath, args=['--shuffle','--deflate','5'])
+
+    assert d.equals(c)
+
+def test_1degree_nc3(tmpdir):
+
+    # This test dataset is masked, has a missing tile, as there is
+    # no data in that tile, and has inconsistent chunk sizes
+    testdir = 'test_data'
+    testdatadir = os.path.join(testdir, 'output_1deg_masked')
+
+    infiles = glob.glob(os.path.join(testdatadir,'ocean_month.nc.????'))
+
     # Open file collated by mppnccombine
-    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'))
+    d = xarray.open_dataset(os.path.join(testdatadir,'ocean_month.nc'),decode_times=False)
+
+    # Convert files to netCDF Classic format and test
+    testdir = os.path.join(tmpdir,testdatadir+"_nc3")
+    os.makedirs(testdir)
+    run_nccopy(['-3'],infiles,testdir)
+
+    infiles = glob.glob(os.path.join(testdir,'ocean_month.nc.????'))
+
+    # No compression
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath)
+
+    assert d.equals(c)
+
+    # Compression + shuffle
+    outpath = tmpdir.join('out_shuff.nc')
+    c = run_collate(infiles, outpath, args=['--shuffle','--deflate','5'])
 
     assert d.equals(c)
