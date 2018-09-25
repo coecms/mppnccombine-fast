@@ -128,7 +128,7 @@ void variable_info_async(
     MPI_Recv(varinfo, ndims+3, MPI_UINT64_T, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    for (int d=0; d<ndims; ++d){
+    for (size_t d=0; d<ndims; ++d){
         chunk[d] = varinfo[d];
     }
 
@@ -218,7 +218,7 @@ void write_uncompressed_async(
     uint64_t chunk_data[chunk_data_count];
     size_t buffer_count = 1;
     
-    for (int d=0;d<ndims;++d) {
+    for (size_t d=0;d<ndims;++d) {
         chunk_data[d]       = chunk_offset[d];
         chunk_data[ndims+d] = chunk_shape[d];
 
@@ -332,7 +332,7 @@ void write_chunk_async(
               TAG_CONTINUE, MPI_COMM_WORLD, &(requests[2]));
 
     uint64_t offset_[ndims];
-    for (int d=0; d<ndims; ++d) {offset_[d] = offset[d];}
+    for (size_t d=0; d<ndims; ++d) {offset_[d] = offset[d];}
     MPI_Isend(offset_, ndims, MPI_UINT64_T, async_writer_rank,
               TAG_CONTINUE, MPI_COMM_WORLD, &(requests[3]));
 
@@ -370,7 +370,7 @@ static size_t receive_write_chunk_async(
              TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     hsize_t offset_[ndims];
-    for (int d=0; d<ndims; ++d) {offset_[d] = offset[d];}
+    for (size_t d=0; d<ndims; ++d) {offset_[d] = offset[d];}
 
     int err = (H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
                           offset_, buffer_size, buffer));
@@ -462,8 +462,8 @@ void close_async(
 }
 
 static void receive_close_async(
-    async_state_t * state,
-    MPI_Status status) {
+    async_state_t * state) {
+
     int buffer = 0;
     int comm_size;
     MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
@@ -545,7 +545,7 @@ size_t run_async_writer(
         MPI_Probe(MPI_ANY_SOURCE, TAG_CLOSE, MPI_COMM_WORLD, &status);
         switch(status.MPI_TAG) {
             case TAG_CLOSE:
-                receive_close_async(&state, status);
+                receive_close_async(&state);
                 return total_size;
                 break;
             default:

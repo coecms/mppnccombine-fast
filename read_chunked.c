@@ -153,7 +153,7 @@ void get_chunk_offset_shape(size_t ndims,                // Number of dims
         ssize_t total_size = (chunk[i] - local_offset[i]%chunk[i])
             + chunkid * chunk[i];
 
-        if (total_size > local_shape[i]) {
+        if (total_size > (ssize_t)local_shape[i]) {
             // Partial chunk on the right
             *partial = true;
             chunk_shape[i] -= total_size - local_shape[i];
@@ -300,7 +300,7 @@ void copy_hdf5_variable_chunks(
             H5ERR(H5DOread_chunk(in_var, H5P_DEFAULT, copy_in_offset, &filter_mask, buffer));
 
             MPI_Request request;
-            write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, 0, &request);
+            write_chunk_async(varid, ndims, filter_mask, copy_out_offset, block_size, buffer, async_writer_rank, &request);
             MPI_Wait(&request, MPI_STATUS_IGNORE);
         }
     }
@@ -350,7 +350,7 @@ void copy_chunked(const char * filename, int async_writer_rank) {
 
         bool filters_match = (shuffle == out_shuffle) && (deflate == out_deflate);
         if (deflate == 1 && filters_match) {
-            filters_match == deflate_level == out_deflate_level;
+            filters_match = deflate_level == out_deflate_level;
         }
 
         // Offset of this file in the collation
