@@ -122,7 +122,7 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
     // Open both files
     NCERR(nc_open(in_path, NC_NOWRITE, &in_file));
 
-    int out_flags = NC_NETCDF4;
+    int out_flags = NC_NETCDF4 | NC_CLASSIC_MODEL;
     if (!args->force) out_flags |= NC_NOCLOBBER;
     int err = nc_create(out_path, out_flags, &out_file);
     if (err == -35) {
