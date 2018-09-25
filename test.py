@@ -42,7 +42,7 @@ def run_nccopy(options, infiles, outdir):
 def run_collate(inputs, output, np=2, args=[]):
     try:
         s = subprocess.check_output(
-                ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args,
+                ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '--debug', '-o', str(output)] + inputs + args,
                 stderr=subprocess.STDOUT)
         print(s.decode('utf-8'))
     except subprocess.CalledProcessError as e:
