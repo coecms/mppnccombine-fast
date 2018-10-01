@@ -42,22 +42,6 @@ struct args_t {
     bool remove;
 };
 
-// Print diagnostic information about this file's collation
-void print_offsets(size_t out_offset[], size_t local_size[], int ndims) {
-    /*
-    fprintf(stdout, "\tStart index ");
-    for (int d=0; d<ndims; ++d) {
-        fprintf(stdout, "% 6zu\t", out_offset[d]);
-    }
-    fprintf(stdout, "\n");
-    fprintf(stdout, "\tShape       ");
-    for (int d=0; d<ndims; ++d) {
-        fprintf(stdout, "% 6zu\t", local_size[d]);
-    }
-    fprintf(stdout, "\n");
-    */
-}
-
 // Copy a (possibly collated) field in NetCDF mode
 void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
     int ndims;
@@ -76,8 +60,6 @@ void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
         in_offset[d] = 0;
     }
 
-    print_offsets(out_offset, local_size, ndims);
-
     // Enough size for float64_t
     void * buffer = malloc(size * 8);
     NCERR(nc_get_vara(ncid_in, varid_in, in_offset, local_size, buffer));
@@ -87,7 +69,7 @@ void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
 
 // Copy NetCDF attributes, either globally or for a variable
 void copy_attrs(int ncid_out, int varid_out, int ncid_in, int varid_in, int natts) {
-    int buffer_len = 1024*8;
+    size_t buffer_len = 1024*8;
     char buffer[buffer_len];
 
     for (int a=0; a<natts; ++a) {
