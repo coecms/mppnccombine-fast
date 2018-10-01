@@ -451,10 +451,10 @@ static void receive_close_variable_async(
     // Decrement the reference count
     state->vars[idx].refcount--;
 
-    // If zero has been reached close the variable
-    if (state->vars[idx].refcount == 0) {
-        H5ERR(H5Dclose(state->vars[idx].var_id));
-    }
+    //// If zero has been reached close the variable
+    //if (state->vars[idx].refcount == 0) {
+    //    H5ERR(H5Dclose(state->vars[idx].var_id));
+    //}
 }
 
 // Close the file (collective op)
