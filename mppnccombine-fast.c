@@ -413,16 +413,14 @@ int main(int argc, char ** argv) {
         log_message(LOG_DEBUG, "Finished read");
     }
 
-    globfree(&globs);
-
     if (comm_rank == writer_rank && args.remove) {
         log_message(LOG_INFO, "Cleaning inputs");
-        int my_file_idx = 0;
-        while (my_file_idx < argc-arg_index) {
-            unlink(argv[arg_index+my_file_idx]);
-            my_file_idx++;
+        for (int my_file_idx =0; my_file_idx < globs.gl_pathc; ++my_file_idx) {
+            unlink(globs.gl_pathv[my_file_idx]);
         }
     }
+
+    globfree(&globs);
 
     MPI_Win_free(&current_file_win);
     return MPI_Finalize();
