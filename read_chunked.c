@@ -381,5 +381,7 @@ void copy_chunked(const char * filename, int async_writer_rank) {
 
         close_variable_async(var, async_writer_rank);
     }
+
+    NCERR(nc_close(ncid));
 }
 
