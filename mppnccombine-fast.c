@@ -423,12 +423,8 @@ int main(int argc, char ** argv) {
 
     log_message(LOG_DEBUG, "Cleanup glob");
     globfree(&globs);
-    log_message(LOG_DEBUG, "Cleanup glob done");
-    MPI_Barrier(MPI_COMM_WORLD);
     log_message(LOG_DEBUG, "Cleanup win");
     MPI_Win_free(&current_file_win);
-    log_message(LOG_DEBUG, "Cleanup win done");
-    MPI_Barrier(MPI_COMM_WORLD);
 
     log_message(LOG_DEBUG, "MPI_Finalize");
     return MPI_Finalize();
