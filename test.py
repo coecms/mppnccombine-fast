@@ -41,13 +41,14 @@ def run_nccopy(options, infiles, outdir):
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
     try:
-        print(['mpirun', '--oversubscribe', '-n', '%d'%np, './mppnccombine-fast', '--debug', '-o', str(output)] + inputs + args)
-        s = subprocess.check_output(
-                ['mpirun', '--oversubscribe', '-n', '%d'%np, './mppnccombine-fast', '--debug', '-o', str(output)] + inputs + args,
-                stderr=subprocess.STDOUT)
-        print(s.decode('utf-8'))
+        command = ['mpirun', '--mca', 'btl', 'self,tcp', '--oversubscribe', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args
+        print(' '.join(command))
+        subprocess.run(
+            command,
+            stdout=sys.stdout,
+            stderr=subprocess.STDOUT,
+            check=True)
     except subprocess.CalledProcessError as e:
-        print(e.stdout.decode('utf-8'))
         raise
     return xarray.open_dataset(str(output), engine='netcdf4', decode_times=False)
 

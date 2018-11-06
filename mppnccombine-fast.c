@@ -416,12 +416,20 @@ int main(int argc, char ** argv) {
     if (comm_rank == writer_rank && args.remove) {
         log_message(LOG_INFO, "Cleaning inputs");
         for (int my_file_idx =0; my_file_idx < globs.gl_pathc; ++my_file_idx) {
+	    log_message(LOG_DEBUG, "unlink %s", globs.gl_pathv[my_file_idx]);
             unlink(globs.gl_pathv[my_file_idx]);
         }
     }
 
+    log_message(LOG_DEBUG, "Cleanup glob");
     globfree(&globs);
-
+    log_message(LOG_DEBUG, "Cleanup glob done");
+    MPI_Barrier(MPI_COMM_WORLD);
+    log_message(LOG_DEBUG, "Cleanup win");
     MPI_Win_free(&current_file_win);
+    log_message(LOG_DEBUG, "Cleanup win done");
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    log_message(LOG_DEBUG, "MPI_Finalize");
     return MPI_Finalize();
 }
