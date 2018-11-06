@@ -42,7 +42,7 @@ def run_nccopy(options, infiles, outdir):
 def run_collate(inputs, output, np=2, args=[]):
     try:
         command = ['mpirun', '--mca', 'btl', 'self,tcp', '--oversubscribe', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args
-        print(' '.join(command))
+        print(' '.join(['%s'%x for x in command]))
         subprocess.run(
             command,
             stdout=sys.stdout,
