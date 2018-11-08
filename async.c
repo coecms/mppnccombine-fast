@@ -294,6 +294,24 @@ static size_t receive_write_uncompressed_async(
 
     hid_t data_space = H5Dget_space(state->vars[idx].var_id);
     H5ERR(data_space);
+
+    // Check if we need to extend the dataset
+    hsize_t file_size[ndims];
+    H5ERR(H5Sget_simple_extent_dims(data_space, file_size, NULL));
+    bool needs_resize = false;
+    for (int d=0;d<ndims;++d) {
+        if (offset[d] + shape[d] > file_size[d]) {
+            needs_resize = true;
+            file_size[d] = offset[d] + shape[d];
+        }
+    }
+    if (needs_resize) {
+        H5ERR(H5Dset_extent(state->vars[idx].var_id, file_size));
+        // Re-open
+        data_space = H5Dget_space(state->vars[idx].var_id);
+        H5ERR(data_space);
+    }
+
     H5ERR(H5Sselect_hyperslab(data_space, H5S_SELECT_SET,
                               offset, NULL, shape, NULL));
 

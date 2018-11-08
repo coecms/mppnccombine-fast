@@ -122,6 +122,24 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
     // Copy global attributes
     copy_attrs(out_file, NC_GLOBAL, in_file, NC_GLOBAL, natts);
 
+    // Get count of unlimited dimensions
+    err = nc_inq_unlimdims(in_file, NULL, NULL);
+    int nunlimdim;
+    if (err != NC_ENOTNC4) {
+        NCERR(nc_inq_unlimdims(in_file, &nunlimdim, NULL));
+    } else {
+        nunlimdim = 1;
+    }
+
+    // Get the dimension ids
+    int unlimdims[nunlimdim];
+    if (err != NC_ENOTNC4) {
+        NCERR(nc_inq_unlimdims(in_file, NULL, unlimdims));
+    } else {
+        NCERR(nc_inq_unlimdim(in_file, unlimdims));
+        if (unlimdims[0] < 1) nunlimdim = 0;
+    }
+
     // Copy dimensions
     for (int d=0; d<ndims;++d) {
         char name[NC_MAX_NAME+1];
@@ -136,6 +154,10 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         if (is_collated(in_file, varid)) {
             // If so get the full length
             get_collated_dim_len(in_file, name, &len);
+        }
+
+        for (int ud=0; ud<nunlimdim; ++ud) {
+            if (d == unlimdims[ud]) len = NC_UNLIMITED;
         }
 
         // Create the out dim
