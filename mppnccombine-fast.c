@@ -137,7 +137,7 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         NCERR(nc_inq_unlimdims(in_file, NULL, unlimdims));
     } else {
         NCERR(nc_inq_unlimdim(in_file, unlimdims));
-        if (unlimdims[0] < 1) nunlimdim = 0;
+        if (unlimdims[0] < 0) nunlimdim = 0;
     }
 
     // Copy dimensions
