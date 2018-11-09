@@ -182,28 +182,26 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         int out_v;
         NCERR(nc_def_var(out_file, name, type, ndims, dimids, &out_v));
 
-        // Chunking needs to be identical in 'in' and 'out' files
-        if (is_collated(in_file, v)) {
-            int storage;
-            size_t chunk[ndims];
-            NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
-            if (storage == NC_CHUNKED) {
-                NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
-            }
+        // Set up chunking
+        int storage;
+        size_t chunk[ndims];
+        NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
+        if (storage == NC_CHUNKED) {
+            NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
+        }
 
-            // Compression needs to be identical in 'in' and 'out' files
-            int shuffle;
-            int deflate;
-            int deflate_level;
-            NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
+        // Set up compression
+        int shuffle;
+        int deflate;
+        int deflate_level;
+        NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
 
-            // Option to override compression
-            if (args->deflate_level != -1) deflate_level = args->deflate_level; 
-            if (args->shuffle != -1) shuffle = args->shuffle; 
+        // Option to override compression
+        if (args->deflate_level != -1) deflate_level = args->deflate_level; 
+        if (args->shuffle != -1) shuffle = args->shuffle; 
 
-            if (shuffle || deflate) {
-                NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
-            }
+        if (shuffle || deflate) {
+            NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
         }
 
         // Copy attributes
