@@ -5,7 +5,7 @@ before_install:
     - bash Miniconda3-latest-Linux-x86_64.sh -b -p ~/conda
     - source ~/conda/bin/activate
     - conda create --yes -c conda-forge -n mppnccombine-fast-build gcc openmpi 'hdf5>=1.10.2' libnetcdf nomkl
-    - conda create --yes -c conda-forge -n mppnccombine-fast-test openmpi pytest xarray nomkl
+    - conda create --yes -c conda-forge -n mppnccombine-fast-test openmpi pytest xarray nomkl netcdf4
 
 script:
     - make CONDA_BUILD=1 mppnccombine-fast
