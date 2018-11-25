@@ -560,4 +560,6 @@ size_t run_async_writer(
     }
     H5ERR(H5Fclose(state.file_id));
     log_message(LOG_DEBUG, "DONE run_async_writer");
+
+    return 0;
 }

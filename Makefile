@@ -25,7 +25,7 @@ endif
 
 all: mppnccombine-fast
 
-test: mppnccombine-fast
+test check: mppnccombine-fast
 	${TEST_ENV} pytest -v --capture=no test.py
 
 mppnccombine-fast: async.o error.o read_chunked.o
