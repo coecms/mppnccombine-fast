@@ -311,3 +311,25 @@ def test_many_files(tmpdir):
     c = run_collate([tmpdir.join('*.nc')], outpath)
 
     assert d.equals(c)
+
+def test_min_dim(tmpdir):
+    """
+    Minimum domain value should be respected 
+    """
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4))
+            },
+            coords = {
+                'x': np.arange(4),
+            })
+    d['x'].attrs['domain_decomposition'] = [101, 104, 101, 104]
+
+    infile = str(tmpdir.join('offset.nc'))
+    d.to_netcdf(infile, encoding={'a':{'chunksizes':(2,)}})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate([infile], outpath)
+
+    assert c.x.size == 4
+
