@@ -545,10 +545,10 @@ size_t run_async_writer(
                 receive_variable_info_async(&state, status);
                 break;
             case (TAG_WRITE_CHUNK):
-                receive_write_chunk_async(&state, status);
+                total_size += receive_write_chunk_async(&state, status);
                 break;
             case (TAG_WRITE_FILTER):
-                receive_write_uncompressed_async(&state, status);
+                total_size += receive_write_uncompressed_async(&state, status);
                 break;
             case (TAG_CLOSE_VARIABLE):
                 receive_close_variable_async(&state, status);
@@ -561,5 +561,5 @@ size_t run_async_writer(
     H5ERR(H5Fclose(state.file_id));
     log_message(LOG_DEBUG, "DONE run_async_writer");
 
-    return 0;
+    return total_size;
 }
