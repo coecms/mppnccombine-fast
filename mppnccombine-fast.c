@@ -25,6 +25,7 @@
 #include <math.h>
 #include <mpi.h>
 #include <unistd.h>
+#include <glob.h>
 
 #include "error.h"
 #include "async.h"
@@ -382,15 +383,23 @@ int main(int argc, char ** argv) {
     const char * in_path = argv[arg_index];
     const char * out_path = args.output;
 
+    // Glob inputs
+    glob_t globs;
+    int glob_flags = GLOB_BRACE | GLOB_TILDE;
+    for (int i=arg_index; i < argc; ++i) {
+        glob(argv[i], glob_flags, NULL, &globs);
+        glob_flags |= GLOB_APPEND;
+    }
+
     int writer_rank = 0;
 
     if (comm_rank == writer_rank) {
         // Copy metadata and un-collated variables
         fprintf(stdout, "\nCopying non-collated variables\n");
-        init(in_path, out_path, &args);
+        init(globs.gl_pathv[0], out_path, &args);
         // Copy contiguous variables using NetCDF
         fprintf(stdout, "\nCopying contiguous variables\n");
-        copy_contiguous(out_path, argv+arg_index, argc-arg_index);
+        copy_contiguous(out_path, globs.gl_pathv, globs.gl_pathc);
 
         fprintf(stdout, "\nCopying chunked variables\n");
         double t_start = MPI_Wtime();
@@ -411,9 +420,10 @@ int main(int argc, char ** argv) {
         MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
         MPI_Win_unlock(0, current_file_win);
 
-        while (my_file_idx < argc-arg_index) {
+        while (my_file_idx < globs.gl_pathc) {
             // Read chunked variables using HDF5, sending data to the async_writer to be written
-            copy_chunked(argv[arg_index+my_file_idx], writer_rank);
+            log_message(LOG_DEBUG, "%d %s", my_file_idx, globs.gl_pathv[my_file_idx]);
+            copy_chunked(globs.gl_pathv[my_file_idx], writer_rank);
 
             MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, current_file_win);
             MPI_Fetch_and_op(&increment, &my_file_idx, MPI_INT, 0, 0, MPI_SUM, current_file_win);
@@ -425,13 +435,17 @@ int main(int argc, char ** argv) {
 
     if (comm_rank == writer_rank && args.remove) {
         log_message(LOG_INFO, "Cleaning inputs");
-        int my_file_idx = 0;
-        while (my_file_idx < argc-arg_index) {
-            unlink(argv[arg_index+my_file_idx]);
-            my_file_idx++;
+        for (int my_file_idx =0; my_file_idx < globs.gl_pathc; ++my_file_idx) {
+	    log_message(LOG_DEBUG, "unlink %s", globs.gl_pathv[my_file_idx]);
+            unlink(globs.gl_pathv[my_file_idx]);
         }
     }
 
+    log_message(LOG_DEBUG, "Cleanup glob");
+    globfree(&globs);
+    log_message(LOG_DEBUG, "Cleanup win");
     MPI_Win_free(&current_file_win);
+
+    log_message(LOG_DEBUG, "MPI_Finalize");
     return MPI_Finalize();
 }
