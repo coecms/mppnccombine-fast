@@ -29,11 +29,18 @@
 #include "netcdf.h"
 #include "error.h"
 
-#define TAG_CONTINUE       1
+//#define TAG_CONTINUE       1
 #define TAG_CLOSE          5
 
 #define TAG_WRITE_CHUNK    10
-#define TAG_WRITE_FILTER   11
+#define TAG_WRITE_CHUNK_NDIMS 11
+#define TAG_WRITE_CHUNK_MASK 12
+#define TAG_WRITE_CHUNK_OFFSET 13
+#define TAG_WRITE_CHUNK_DATA 14
+
+#define TAG_WRITE_FILTER   15
+#define TAG_WRITE_FILTER_SHAPE   16
+#define TAG_WRITE_FILTER_DATA   17
 
 #define TAG_OPEN_VARIABLE  20
 #define TAG_CLOSE_VARIABLE 21
@@ -60,10 +67,13 @@ varid_t open_variable_async(
     ) {
     varid_t out;
 
-    MPI_Send(varname, len, MPI_CHAR, async_writer_rank,
+    log_message(LOG_DEBUG, "SEND open variable %s", varname);
+    MPI_Ssend(varname, len, MPI_CHAR, async_writer_rank,
              TAG_OPEN_VARIABLE, MPI_COMM_WORLD);
+    log_message(LOG_DEBUG, "Waiting on %d %d", async_writer_rank, TAG_OPEN_VARIABLE);
     MPI_Recv(&(out.idx), 1, MPI_INT, async_writer_rank,
              TAG_OPEN_VARIABLE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    log_message(LOG_DEBUG, "RECV id of variable %s is %d", varname, out);
 
     return out;
 }
@@ -72,7 +82,8 @@ void close_variable_async(
     varid_t varid,
     int async_writer_rank
     ) {
-    MPI_Send(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD);
+    //log_message(LOG_DEBUG, "SEND close variable %d",varid);
+    //MPI_Send(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD);
 }
 
 // Change a NetCDF type to MPI
@@ -121,12 +132,14 @@ void variable_info_async(
     ) {
 
     // Send the variable ID we want to write to
-    MPI_Send(&(var.idx), 1, MPI_INT, async_writer_rank,
+    log_message(LOG_DEBUG, "SEND info variable %d", var);
+    MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD);
 
     uint64_t varinfo[ndims+3];
     MPI_Recv(varinfo, ndims+3, MPI_UINT64_T, async_writer_rank,
              TAG_VAR_INFO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    log_message(LOG_DEBUG, "RECV info variable %d", var);
 
     for (size_t d=0; d<ndims; ++d){
         chunk[d] = varinfo[d];
@@ -192,8 +205,9 @@ void receive_variable_info_async(
 
     H5ERR(H5Pclose(plist));
 
-    MPI_Send(varinfo, ndims+3, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
+    MPI_Ssend(varinfo, ndims+3, MPI_UNSIGNED_LONG_LONG, status.MPI_SOURCE,
              status.MPI_TAG, MPI_COMM_WORLD);
+    log_message(LOG_DEBUG, "RECV info variable %s done", state->vars[idx].varname);
 }
 
 
@@ -207,12 +221,13 @@ void write_uncompressed_async(
     nc_type type,
     int async_writer_rank,
     MPI_Request * request) {
-    
+    *request = MPI_REQUEST_NULL; 
     MPI_Request requests[4];
 
     // Send the variable ID we want to write to
-    MPI_Isend(&(var.idx), 1, MPI_INT, async_writer_rank,
-              TAG_WRITE_FILTER, MPI_COMM_WORLD, &(requests[0]));
+    log_message(LOG_DEBUG, "SEND write variable %d", var);
+    MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank,
+              TAG_WRITE_FILTER, MPI_COMM_WORLD);
 
     // Pack chunk information into a vector
     int chunk_data_count = 2 * ndims + 1;
@@ -228,14 +243,20 @@ void write_uncompressed_async(
 
     chunk_data[2*ndims] = type;
 
-    MPI_Isend(chunk_data, chunk_data_count, MPI_UINT64_T, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[1]));
+    MPI_Ssend(chunk_data, chunk_data_count, MPI_UINT64_T, async_writer_rank,
+              TAG_WRITE_FILTER_SHAPE, MPI_COMM_WORLD);
+
 
     MPI_Datatype type_mpi = type_nc_to_mpi(type);
 
     // Send the buffer - reciever can get the count and type
-    MPI_Isend(buffer, buffer_count, type_mpi, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, request);
+    MPI_Ssend(buffer, buffer_count, type_mpi, async_writer_rank,
+              TAG_WRITE_FILTER_DATA, MPI_COMM_WORLD);
+
+    int receipt;
+    MPI_Recv(&receipt, 1, MPI_INT, async_writer_rank, TAG_WRITE_FILTER, 
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    log_message(LOG_DEBUG, "RECEIPT write variable %d", var);
 }
 
 static size_t receive_write_uncompressed_async(
@@ -253,27 +274,31 @@ static size_t receive_write_uncompressed_async(
     log_message(LOG_DEBUG, "RECV write variable %s", state->vars[idx].varname);
 
     MPI_Status probe;
-    MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &probe);
+    MPI_Probe(status.MPI_SOURCE, TAG_WRITE_FILTER_SHAPE, MPI_COMM_WORLD, &probe);
 
     int chunk_data_count;
     MPI_Get_count(&probe, MPI_UINT64_T, &chunk_data_count);
 
     uint64_t chunk_data[chunk_data_count];
     MPI_Recv(chunk_data, chunk_data_count, MPI_UINT64_T, status.MPI_SOURCE,
-             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_FILTER_SHAPE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     int type = chunk_data[chunk_data_count - 1];
 
     MPI_Datatype type_mpi = type_nc_to_mpi(type);
 
-    MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &probe);
+    MPI_Probe(status.MPI_SOURCE, TAG_WRITE_FILTER_DATA, MPI_COMM_WORLD, &probe);
 
     int buffer_count;
     MPI_Get_count(&probe, type_mpi, &buffer_count);
 
     char buffer[buffer_count * sizeof(double)];
     MPI_Recv(buffer, buffer_count, type_mpi, status.MPI_SOURCE,
-             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_FILTER_DATA, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    // Send receipt
+    MPI_Send(&buffer_count, 1, MPI_INT, status.MPI_SOURCE, TAG_WRITE_FILTER, MPI_COMM_WORLD);
+    log_message(LOG_DEBUG, "RECEIPT write variable %s", state->vars[idx].varname);
 
     // Unpack chunk info
     int ndims = (chunk_data_count - 1) / 2;
@@ -323,24 +348,36 @@ void write_chunk_async(
     int async_writer_rank,
     MPI_Request * request
     ) {
+    *request = MPI_REQUEST_NULL;
     MPI_Request requests[4];
 
-    MPI_Isend(&(var.idx), 1, MPI_INT, async_writer_rank,
-              TAG_WRITE_CHUNK, MPI_COMM_WORLD, &(requests[0]));
+    log_message(LOG_DEBUG, "SEND raw write %d", var);
+    MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank,
+              TAG_WRITE_CHUNK, MPI_COMM_WORLD);
     
     uint64_t ndims_ = ndims;
-    MPI_Isend(&ndims_, 1, MPI_UINT64_T, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[1]));
-    MPI_Isend(&filter_mask, 1, MPI_UINT32_T, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[2]));
+    MPI_Ssend(&ndims_, 1, MPI_UINT64_T, async_writer_rank,
+              TAG_WRITE_CHUNK_NDIMS, MPI_COMM_WORLD);
+    MPI_Ssend(&filter_mask, 1, MPI_UINT32_T, async_writer_rank,
+              TAG_WRITE_CHUNK_MASK, MPI_COMM_WORLD);
 
     uint64_t offset_[ndims];
     for (size_t d=0; d<ndims; ++d) {offset_[d] = offset[d];}
-    MPI_Isend(offset_, ndims, MPI_UINT64_T, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, &(requests[3]));
+    MPI_Ssend(offset_, ndims, MPI_UINT64_T, async_writer_rank,
+              TAG_WRITE_CHUNK_OFFSET, MPI_COMM_WORLD);
 
-    MPI_Isend(buffer, data_size, MPI_CHAR, async_writer_rank,
-              TAG_CONTINUE, MPI_COMM_WORLD, request);
+    log_message(LOG_DEBUG, "WAIT raw write %d", var);
+
+    MPI_Ssend(buffer, data_size, MPI_CHAR, async_writer_rank,
+              TAG_WRITE_CHUNK_DATA, MPI_COMM_WORLD);
+
+    MPI_Wait(request, MPI_STATUS_IGNORE);
+    log_message(LOG_DEBUG, "SEND raw write %d done", var);
+
+    int receipt;
+    MPI_Recv(&receipt, 1, MPI_INT, async_writer_rank, TAG_WRITE_CHUNK, 
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    log_message(LOG_DEBUG, "RECEIPT write variable %d", var);
 }
 
 static size_t receive_write_chunk_async(
@@ -355,24 +392,29 @@ static size_t receive_write_chunk_async(
     MPI_Recv(&idx, 1, MPI_INT, status.MPI_SOURCE,
              TAG_WRITE_CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     MPI_Recv(&ndims, 1, MPI_UINT64_T, status.MPI_SOURCE,
-             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_CHUNK_NDIMS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     MPI_Recv(&filter_mask, 1, MPI_UINT64_T, status.MPI_SOURCE,
-             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_CHUNK_MASK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    log_message(LOG_DEBUG, "RECV raw write variable %s", state->vars[idx].varname);
-    
     uint64_t offset[ndims];
     MPI_Recv(offset, ndims, MPI_UINT64_T, status.MPI_SOURCE,
-             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_CHUNK_OFFSET, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    log_message(LOG_DEBUG, "RECV raw write variable %s", state->vars[idx].varname);
 
     int buffer_size;
     MPI_Status buffer_status;
-    MPI_Probe(status.MPI_SOURCE, TAG_CONTINUE, MPI_COMM_WORLD, &buffer_status);
+    MPI_Probe(status.MPI_SOURCE, TAG_WRITE_CHUNK_DATA, MPI_COMM_WORLD, &buffer_status);
     MPI_Get_count(&buffer_status, MPI_CHAR, &buffer_size);
 
     char buffer[buffer_size];
     MPI_Recv(buffer, buffer_size, MPI_CHAR, status.MPI_SOURCE,
-             TAG_CONTINUE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             TAG_WRITE_CHUNK_DATA, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    log_message(LOG_DEBUG, "RECV raw write variable %s passing to hdf5", state->vars[idx].varname);
+
+    // Send receipt
+    MPI_Send(&buffer_size, 1, MPI_INT, status.MPI_SOURCE, TAG_WRITE_CHUNK, MPI_COMM_WORLD);
+    log_message(LOG_DEBUG, "RECEIPT write variable %s", state->vars[idx].varname);
 
     hsize_t offset_[ndims];
     for (size_t d=0; d<ndims; ++d) {offset_[d] = offset[d];}
@@ -384,6 +426,7 @@ static size_t receive_write_chunk_async(
     }
     H5ERR(err);
 
+    log_message(LOG_DEBUG, "RECV raw write variable %s done", state->vars[idx].varname);
     return buffer_size;
 }
 
@@ -412,6 +455,7 @@ static void receive_open_variable_async(
     }
 
     if (out < 0) {
+        log_message(LOG_DEBUG, "Variable %s not in cache", varname);
         // Add a new var
         out = (state->total_vars)++;
         assert(state->total_vars < MAX_VARIABLES);
@@ -420,6 +464,7 @@ static void receive_open_variable_async(
         state->vars[out].refcount = 0;
         strncpy(state->vars[out].varname, varname, len);
     }
+    log_message(LOG_DEBUG, "Variable %s has id %d", varname, out);
 
     if (state->vars[out].refcount == 0) {
         // Open the var
@@ -431,10 +476,13 @@ static void receive_open_variable_async(
 
     // Increment the refcount
     state->vars[out].refcount++;
+    log_message(LOG_DEBUG, "Variable %s has refcount %d", varname, state->vars[out].refcount);
+    log_message(LOG_DEBUG, "Message %d %d %d", out, status.MPI_SOURCE, TAG_OPEN_VARIABLE);
 
     // Send the id
-    MPI_Send(&out, 1, MPI_INT, status.MPI_SOURCE, TAG_OPEN_VARIABLE,
+    MPI_Ssend(&out, 1, MPI_INT, status.MPI_SOURCE, TAG_OPEN_VARIABLE,
              MPI_COMM_WORLD);
+    log_message(LOG_DEBUG, "OPEN sent");
 
 }
 
@@ -461,32 +509,16 @@ static void receive_close_variable_async(
 void close_async(
     int async_writer_rank
     ) {
-
-    MPI_Request r;
-    MPI_Ibarrier(MPI_COMM_WORLD, &r);
-    MPI_Wait(&r, MPI_STATUS_IGNORE);
-
     int buffer = 0;
+    log_message(LOG_DEBUG, "SEND close file");
     MPI_Send(&buffer, 1, MPI_INT, async_writer_rank, TAG_CLOSE, MPI_COMM_WORLD);
-}
-
-static void receive_close_async(
-    async_state_t * state) {
-    log_message(LOG_DEBUG, "RECV close file");
-
-    int buffer = 0;
-    int comm_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-    for (int i=1;i<comm_size;++i) {
-        MPI_Recv(&buffer, 1, MPI_INT, i, TAG_CLOSE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-    H5ERR(H5Fclose(state->file_id));
 }
 
 // Async runner to accept writes
 size_t run_async_writer(
     const char * filename
     ) {
+    MPI_Comm comm = MPI_COMM_WORLD;
     size_t total_size = 0;
 
     async_state_t state;
@@ -496,87 +528,36 @@ size_t run_async_writer(
 
     state.total_vars = 0;
 
-    while (true) {
-        // Check for a collective operation
-        MPI_Request barrier_request;
-        MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
+    int open_senders;
+    MPI_Comm_size(comm, &open_senders);
+    --open_senders; // This process isn't sending
 
-        int reached_barrier = 1;
-
-        // Non-collective operations
-        // Keeps checking for messages until a barrier has been reached and
-        // there are no waiting messages
-        bool more_messages = true;
-        while (!reached_barrier || more_messages) {
-            MPI_Status status;
-            int flag;
-
-            MPI_Test(&barrier_request, &reached_barrier, MPI_STATUS_IGNORE);
-
-            more_messages = false;
-
-            // Receive all the writes before closing any variables
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_CHUNK, MPI_COMM_WORLD, &flag, &status);
-            if (flag) {
-                total_size += receive_write_chunk_async(&state, status);
-                more_messages = true;
-                continue;
-            }
-
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_WRITE_FILTER, MPI_COMM_WORLD, &flag, &status);
-            if (flag) {
-                total_size += receive_write_uncompressed_async(&state, status);
-                more_messages = true;
-                continue;
-            }
-
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_OPEN_VARIABLE, MPI_COMM_WORLD, &flag, &status);
-            if (flag) {
-                receive_open_variable_async(&state, status);
-                more_messages = true;
-            }
-
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_VAR_INFO, MPI_COMM_WORLD, &flag, &status);
-            if (flag) {
-                receive_variable_info_async(&state, status);
-                more_messages = true;
-            }
-
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_CLOSE_VARIABLE, MPI_COMM_WORLD, &flag, &status);
-            if (flag) {
-                {
-                    // Check if still being used
-                    MPI_Iprobe(status.MPI_SOURCE, TAG_WRITE_CHUNK, MPI_COMM_WORLD, &flag,
-                               MPI_STATUS_IGNORE);
-                    if (flag) continue;
-                    MPI_Iprobe(status.MPI_SOURCE, TAG_WRITE_FILTER, MPI_COMM_WORLD, &flag,
-                               MPI_STATUS_IGNORE);
-                    if (flag) continue;
-                    MPI_Iprobe(status.MPI_SOURCE, TAG_OPEN_VARIABLE, MPI_COMM_WORLD, &flag,
-                               MPI_STATUS_IGNORE);
-                    if (flag) continue;
-                    MPI_Iprobe(status.MPI_SOURCE, TAG_VAR_INFO, MPI_COMM_WORLD, &flag,
-                               MPI_STATUS_IGNORE);
-                    if (flag) continue;
-                }
-                receive_close_variable_async(&state, status);
-                more_messages = true;
-            }
-
-        }
-
-        // Collective operations
+    while (open_senders > 0) {
         MPI_Status status;
-        MPI_Probe(MPI_ANY_SOURCE, TAG_CLOSE, MPI_COMM_WORLD, &status);
-        switch(status.MPI_TAG) {
-            case TAG_CLOSE:
-                receive_close_async(&state);
-                return total_size;
-                break;
-            default:
-                fprintf(stderr, "Unknown TAG %d received by run_async_writer\n", status.MPI_TAG);
-                MPI_Abort(MPI_COMM_WORLD, -1);
-        }
+        MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
+        log_message(LOG_DEBUG, "PROBE tag %d from rank %d", status.MPI_TAG, status.MPI_SOURCE);
 
+        switch(status.MPI_TAG) {
+            case (TAG_OPEN_VARIABLE):
+                receive_open_variable_async(&state, status);
+                break;
+            case (TAG_VAR_INFO):
+                receive_variable_info_async(&state, status);
+                break;
+            case (TAG_WRITE_CHUNK):
+                receive_write_chunk_async(&state, status);
+                break;
+            case (TAG_WRITE_FILTER):
+                receive_write_uncompressed_async(&state, status);
+                break;
+            case (TAG_CLOSE_VARIABLE):
+                receive_close_variable_async(&state, status);
+                break;
+            case (TAG_CLOSE):
+                --open_senders;
+                break;
+        }
     }
+    H5ERR(H5Fclose(state.file_id));
+    log_message(LOG_DEBUG, "DONE run_async_writer");
 }

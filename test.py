@@ -41,12 +41,14 @@ def run_nccopy(options, infiles, outdir):
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
     try:
-        s = subprocess.check_output(
-                ['mpirun', '-n', '%d'%np, './mppnccombine-fast', '--debug', '-o', str(output)] + inputs + args,
-                stderr=subprocess.STDOUT)
-        print(s.decode('utf-8'))
+        command = ['mpirun', '--mca', 'btl', 'self,tcp', '--oversubscribe', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args
+        print(' '.join(['%s'%x for x in command]))
+        subprocess.run(
+            command,
+            stdout=sys.stdout,
+            stderr=subprocess.STDOUT,
+            check=True)
     except subprocess.CalledProcessError as e:
-        print(e.stdout.decode('utf-8'))
         raise
     return xarray.open_dataset(str(output), engine='netcdf4', decode_times=False)
 
@@ -66,7 +68,7 @@ def split_file(tmpdir, data, split):
     i = 0
     infiles = []
     for start in range(0, len(data['x']), split['x']):
-        infiles.append(str(tmpdir.join('%03d.nc'%i)))
+        infiles.append(str(tmpdir.join('in.%04d.nc'%i)))
 
         d = data.isel(**{'x': slice(start, start+split['x'])})
         d['x'].attrs['domain_decomposition'] = [1,len(data['x']), 1+start, min(start+split['x'], len(data['x']))]
@@ -291,5 +293,21 @@ def test_1degree_nc3(tmpdir):
     # Compression + shuffle
     outpath = tmpdir.join('out_shuff.nc')
     c = run_collate(infiles, outpath, args=['--shuffle','--deflate','5'])
+
+    assert d.equals(c)
+
+def test_many_files(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4000))
+            },
+            coords = {
+                'x': np.arange(4000),
+            })
+
+    infiles = split_file(tmpdir, d, {'x': 2})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate([tmpdir.join('*.nc')], outpath)
 
     assert d.equals(c)
