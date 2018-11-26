@@ -364,9 +364,8 @@ void copy_chunked(const char * filename, int async_writer_rank) {
             is_aligned &= in_chunk[d] == out_chunk[d];
             // Start lines up with chunks
             is_aligned &= out_offset[d]%out_chunk[d] == 0;
-            // End lines up with chunks, or is the final chunk
-            is_aligned &= ((out_offset[d] + local_size[d])%out_chunk[d] == 0
-                           || out_offset[d] + local_size[d] == total_size[d]);
+            // End lines up with chunks
+            is_aligned &= ((out_offset[d] + local_size[d])%out_chunk[d] == 0);
         }
 
         if (is_aligned && filters_match) {
