@@ -87,12 +87,16 @@ hid_t get_resized_space(async_state_t * state, int idx, int ndims, hsize_t offse
 
     // Check if we need to extend the dataset
     hsize_t file_size[ndims];
-    H5ERR(H5Sget_simple_extent_dims(data_space, file_size, NULL));
+    hsize_t max_size[ndims];
+    H5ERR(H5Sget_simple_extent_dims(data_space, file_size, max_size));
     bool needs_resize = false;
     for (int d=0;d<ndims;++d) {
         if (offset[d] + shape[d] > file_size[d]) {
             needs_resize = true;
             file_size[d] = offset[d] + shape[d];
+            if ((max_size[d] != H5S_UNLIMITED) && (file_size[d] > max_size[d])) {
+                file_size[d] = max_size[d];
+            }
         }
     }
     if (needs_resize) {
