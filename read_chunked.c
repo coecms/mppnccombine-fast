@@ -50,17 +50,18 @@ bool get_collated_dim_decomp(int ncid, const char * varname, int decomposition[4
 void get_collated_dim_len(int ncid, const char * varname, size_t * len) {
     int decomposition[4];
     get_collated_dim_decomp(ncid, varname, decomposition);
-    *len = decomposition[1];
+    *len = decomposition[1] - (decomposition[0] - 1);
 }
 
 // Get collation info from a variable
-// in_offset[ndims]  - The offset in the local data TODO: remove
-// out_offset[ndims] - The offset in the collated array of this variable
+// out_offset[ndims] - The offset in the collated array of this file's variable
 // local_size[ndims] - The size of this variable
 // total_size[ndims] - The total collated size of this variable
 // returns true if any of the dimensions are collated
 bool get_collation_info(int ncid, int varid,
-                        size_t out_offset[], size_t local_size[], size_t total_size[],
+                        size_t out_offset[],
+                        size_t local_size[],
+                        size_t total_size[],
                         int ndims) {
 
     // Get the dimension ids
@@ -81,9 +82,10 @@ bool get_collation_info(int ncid, int varid,
 
         // Calculate the per-dim values
         if (is_collated[d]) {
-            out_offset[d] = decomposition[2] - 1;
-            local_size[d] = decomposition[3] - out_offset[d];
-            total_size[d] = decomposition[1];
+            // Subtract the whole-dataset offset from this file's value
+            out_offset[d] = decomposition[2] - decomposition[0];
+            local_size[d] = decomposition[3] - (decomposition[2] - 1);
+            total_size[d] = decomposition[1] - decomposition[0];
         } else {
             out_offset[d] = 0;
             size_t len;
