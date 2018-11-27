@@ -588,6 +588,11 @@ size_t run_async_writer(
                 break;
         }
     }
+
+    for (int v=0; v<state.total_vars; ++v) {
+        H5ERR(H5Dclose(state.vars[v].var_id));
+    }
+
     H5ERR(H5Fclose(state.file_id));
     log_message(LOG_DEBUG, "DONE run_async_writer");
 

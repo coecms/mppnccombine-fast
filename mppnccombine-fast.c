@@ -26,6 +26,7 @@
 #include <mpi.h>
 #include <unistd.h>
 #include <glob.h>
+#include <time.h>
 
 #include "error.h"
 #include "async.h"
@@ -269,6 +270,82 @@ void file_match_check(bool test, const char * filea, const char * fileb, const c
     }
 }
 
+void add_metadata(const char * file, int argc, char ** const argv) {
+    int ncid;
+    NCERR(nc_open(file, NC_WRITE, &ncid));
+
+    // Remove decomposition info from collated variables
+    int nvars;
+    NCERR(nc_inq_nvars(ncid, &nvars));
+    for (int v=0; v<nvars; ++v) {
+        int err = nc_del_att(ncid, v, "domain_decomposition");
+        if (err == NC_ENOTATT) continue;
+        NCERR(err);
+    }
+
+    // Build up a string with the command line
+    size_t argv_len[argc];
+    size_t total_len = 0;
+    for (int a=0; a<argc; ++a) {
+        argv_len[a] = strlen(argv[a]) + 1;
+        total_len += argv_len[a];
+    }
+    char * commandline = malloc(total_len);
+    size_t offset=0;
+    for (int a=0; a<argc; ++a) {
+       memcpy(commandline+offset, argv[a], argv_len[a]);
+       offset += argv_len[a];
+       commandline[offset-1] = ' ';
+    }
+    commandline[total_len-1] = '\0';
+    
+    if (total_len > 100) {
+        log_message(LOG_WARNING, "WARNING: Output file history is long, "
+                    "consider escaping wildcards like `./mppnccombine-fast "
+                    "input.nc.\\* -o output.nc`");
+    }
+
+    // Get the current time
+    time_t now = time(NULL);
+    struct tm * time_tm = gmtime(&now);
+
+    char timestamp[4 + 2 + 2 + 1 + 2 + 2 + 3];
+    int err = strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%MZ:", time_tm);
+    if (err == 0) { 
+        CERR(-1, "Error calculating timestamp");
+    }
+
+    // Get the old history
+    size_t old_history_len;
+    err = nc_inq_attlen(ncid, NC_GLOBAL, "history", &old_history_len);
+    if (err == NC_ENOTATT) {
+        log_message(LOG_DEBUG, "No previous history");
+        old_history_len = 0;
+    }
+
+    size_t history_len = old_history_len + sizeof(timestamp) + total_len;
+    log_message(LOG_DEBUG, "History length %zu", history_len);
+    char * history = malloc(history_len);
+
+    if (old_history_len > 0) {
+        NCERR(nc_get_att_text(ncid, NC_GLOBAL, "history", history));
+        log_message(LOG_DEBUG, "%s", history);
+        history[old_history_len-1] = '\n';
+    }
+
+    memcpy(history+old_history_len, timestamp, sizeof(timestamp));
+    log_message(LOG_DEBUG, "%s", history);
+    history[old_history_len+sizeof(timestamp)-1] = ' ';
+    memcpy(history+old_history_len+sizeof(timestamp), commandline, total_len);
+    log_message(LOG_DEBUG, "%s", history);
+
+    NCERR(nc_put_att_text(ncid, NC_GLOBAL, "history", history_len, history));
+
+    free(history);
+    free(commandline);
+    NCERR(nc_close(ncid));
+}
+
 static char doc[] = "\nQuickly collate MOM model files\n\nGathers the INPUT MOM model files (provided e.g. with a shell glob) and joins them along their horizontal dimensions into a single NetCDF file";
 
 static struct argp_option opts[] = {
@@ -414,6 +491,9 @@ int main(int argc, char ** argv) {
         size_t total_size = run_async_writer(out_path);
         double t_end = MPI_Wtime();
         double total_size_gb = total_size / pow(1024,3);
+
+        // Clean up attributes & add to history
+        add_metadata(out_path, argc, argv);
 
         fprintf(stdout, "\nTotal compressed size %.2f GiB | Time %.2fs | %.2f MiB / sec\n",
                 total_size_gb, t_end - t_start, total_size / pow(1024,2) /(t_end - t_start));
