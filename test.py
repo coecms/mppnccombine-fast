@@ -129,6 +129,8 @@ def test_split_on_boundary(tmpdir):
 
     assert (c.a.data == d.a.data).all()
     assert (c.x.data == d.x.data).all()
+    
+    assert 'domain_decomposition' not in c.x.attrs
 
 
 def test_split_off_boundary(tmpdir):
