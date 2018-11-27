@@ -25,6 +25,7 @@ import pytest
 import os
 import glob
 import sys
+import numpy.testing
 
 def run_nccopy(options, infiles, outdir):
     try:
@@ -111,6 +112,7 @@ def test_simple(tmpdir):
     c = run_collate([inpath], outpath)
 
     assert (c.a.data == d.a.data).all()
+    numpy.testing.assert_array_equal(c.a.data, d.a.data)
 
 
 def test_split_on_boundary(tmpdir):
@@ -380,4 +382,27 @@ def test_min_dim(tmpdir):
     c = run_collate([infile], outpath)
 
     assert c.x.size == 4
+
+def test_partial_vertical_chunk(tmpdir):
+    inpath = str(tmpdir.join('test.nc'))
+    outpath = tmpdir.join('out.nc')
+    d = xarray.Dataset(
+            {
+                'a': (['z','x'], numpy.zeros((3,1)))
+            },
+            coords = {
+                'x': np.arange(1),
+                'z': np.arange(3),
+            })
+    d.x.attrs['domain_decomposition'] = [1, 1, 1, 1]
+
+    d.to_netcdf(inpath, encoding={
+            'a': {
+                'chunksizes': (2,1),
+                },
+        })
+
+    c = run_collate([inpath], outpath)
+
+    numpy.testing.assert_array_equal(c.a.data, d.a.data)
 

@@ -263,7 +263,7 @@ void copy_hdf5_variable_chunks(
     int n_chunks = 1;
     int chunk_decomp[ndims];
     for (int d=0; d<ndims; ++d) {
-        chunk_decomp[d] = shape[d] / chunk[d];
+        chunk_decomp[d] = ceil(shape[d] / (float)chunk[d]);
         n_chunks *= chunk_decomp[d];
     }
 
@@ -276,6 +276,7 @@ void copy_hdf5_variable_chunks(
 
     // Loop over all the chunks
     for (int c=0; c<n_chunks; ++c) {
+        // Offset of this chunk in the Nd dataset
         hsize_t offset[ndims];
         int i = c;
         for (int d=ndims-1; d>=0; --d) {

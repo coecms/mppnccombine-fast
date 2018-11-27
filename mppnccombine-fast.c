@@ -149,12 +149,20 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         int varid;
 
         NCERR(nc_inq_dim(in_file, d, name, &len));
+        log_message(LOG_DEBUG, "checking variable %s", name);
 
         // Check if the variable with the same name is collated
-        NCERR(nc_inq_varid(in_file, name, &varid));
-        if (is_collated(in_file, varid)) {
-            // If so get the full length
-            get_collated_dim_len(in_file, name, &len);
+        err = nc_inq_varid(in_file, name, &varid);
+        if (err == NC_ENOTVAR) {
+            // No associated variable
+            continue;
+        } else {
+            NCERR(err);
+
+            if (is_collated(in_file, varid)) {
+                // If so get the full length
+                get_collated_dim_len(in_file, name, &len);
+            }
         }
 
         for (int ud=0; ud<nunlimdim; ++ud) {
@@ -444,7 +452,7 @@ int main(int argc, char ** argv) {
     log_message(LOG_DEBUG, "Cleanup glob");
     globfree(&globs);
     log_message(LOG_DEBUG, "Cleanup win");
-    MPI_Win_free(&current_file_win);
+    //MPI_Win_free(&current_file_win);
 
     log_message(LOG_DEBUG, "MPI_Finalize");
     return MPI_Finalize();
