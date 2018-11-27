@@ -296,6 +296,54 @@ def test_1degree_nc3(tmpdir):
 
     assert d.equals(c)
 
+def test_unlimited(tmpdir):
+    inpath = str(tmpdir.join('test.nc'))
+    outpath = tmpdir.join('out1.nc')
+    d = xarray.Dataset(
+            {
+                'a': (['time','x'], np.random.rand(6,5))
+            },
+            coords = {
+                'x': np.arange(5),
+                'time': np.arange(6),
+            })
+
+    d.to_netcdf(inpath,
+            unlimited_dims = ['time'],
+            encoding={
+            'a': {
+                'chunksizes': (2,2),
+                'zlib': True,
+                'shuffle': True,
+                'complevel': 4,
+                },
+        })
+    c = run_collate([inpath], outpath)
+    assert c.encoding['unlimited_dims'] == set(['time'])
+
+    outpath = tmpdir.join('out2.nc')
+    d = xarray.Dataset(
+            {
+                'a': (['time','x'], np.random.rand(1,5))
+            },
+            coords = {
+                'x': np.arange(5),
+                'time': np.arange(1),
+            })
+
+    d.to_netcdf(inpath,
+            unlimited_dims = ['time'],
+            encoding={
+            'a': {
+                'chunksizes': (1,2),
+                'zlib': True,
+                'shuffle': True,
+                'complevel': 4,
+                },
+        })
+    c = run_collate([inpath], outpath, args=['--force'])
+    assert c.encoding['unlimited_dims'] == set(['time'])
+
 def test_many_files(tmpdir):
     d = xarray.Dataset(
             {

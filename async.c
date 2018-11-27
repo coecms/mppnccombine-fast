@@ -47,6 +47,7 @@
 #define TAG_VAR_INFO       22
 
 #define MAX_VARIABLES 100
+#define MAX_DIMS 10
 
 typedef struct {
     hid_t file_id;
@@ -55,6 +56,7 @@ typedef struct {
         hid_t var_id;
         char varname[NC_MAX_NAME+1];
         size_t refcount;
+        hsize_t chunk_shape[MAX_DIMS]; // Set by get_var_info
     } vars[MAX_VARIABLES];
     
     int total_vars;
@@ -76,6 +78,30 @@ varid_t open_variable_async(
     log_message(LOG_DEBUG, "RECV id of variable %s is %d", varname, out);
 
     return out;
+}
+
+// Get a dataspace, making sure it can fit the field
+hid_t get_resized_space(async_state_t * state, int idx, int ndims, hsize_t offset[], hsize_t shape[]) {
+    hid_t data_space = H5Dget_space(state->vars[idx].var_id);
+    H5ERR(data_space);
+
+    // Check if we need to extend the dataset
+    hsize_t file_size[ndims];
+    H5ERR(H5Sget_simple_extent_dims(data_space, file_size, NULL));
+    bool needs_resize = false;
+    for (int d=0;d<ndims;++d) {
+        if (offset[d] + shape[d] > file_size[d]) {
+            needs_resize = true;
+            file_size[d] = offset[d] + shape[d];
+        }
+    }
+    if (needs_resize) {
+        H5ERR(H5Dset_extent(state->vars[idx].var_id, file_size));
+        // Re-open
+        data_space = H5Dget_space(state->vars[idx].var_id);
+        H5ERR(data_space);
+    }
+    return data_space;
 }
 
 void close_variable_async(
@@ -172,6 +198,7 @@ void receive_variable_info_async(
     H5ERR(plist);
 
     H5ERR(H5Pget_chunk(plist, ndims, varinfo + 0));
+    H5ERR(H5Pget_chunk(plist, ndims, state->vars[idx].chunk_shape));
 
     int nfilters = H5Pget_nfilters(plist);
     H5ERR(nfilters);
@@ -317,8 +344,8 @@ static size_t receive_write_uncompressed_async(
     hid_t mem_space = H5Screate_simple(ndims, shape, NULL);
     H5ERR(mem_space);
 
-    hid_t data_space = H5Dget_space(state->vars[idx].var_id);
-    H5ERR(data_space);
+    hid_t data_space = get_resized_space(state, idx, ndims, offset, shape);
+
     H5ERR(H5Sselect_hyperslab(data_space, H5S_SELECT_SET,
                               offset, NULL, shape, NULL));
 
@@ -418,6 +445,9 @@ static size_t receive_write_chunk_async(
 
     hsize_t offset_[ndims];
     for (size_t d=0; d<ndims; ++d) {offset_[d] = offset[d];}
+
+    hid_t data_space = get_resized_space(state, idx, ndims, offset_, state->vars[idx].chunk_shape);
+    H5ERR(H5Sclose(data_space));
 
     int err = (H5DOwrite_chunk(state->vars[idx].var_id, H5P_DEFAULT, filter_mask,
                           offset_, buffer_size, buffer));
