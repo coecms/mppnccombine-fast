@@ -543,9 +543,8 @@ static void receive_close_variable_async(
 void close_async(
     int async_writer_rank
     ) {
-    int buffer = 0;
     log_message(LOG_DEBUG, "SEND close file");
-    MPI_Send(&buffer, 1, MPI_INT, async_writer_rank, TAG_CLOSE, MPI_COMM_WORLD);
+    MPI_Send(NULL, 0, MPI_INT, async_writer_rank, TAG_CLOSE, MPI_COMM_WORLD);
 }
 
 // Async runner to accept writes
@@ -589,6 +588,8 @@ size_t run_async_writer(
                 break;
             case (TAG_CLOSE):
                 --open_senders;
+                MPI_Recv(NULL, 0, MPI_INT, status.MPI_SOURCE, TAG_CLOSE, MPI_COMM_WORLD,
+                         MPI_STATUS_IGNORE);
                 break;
         }
     }

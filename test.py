@@ -408,3 +408,18 @@ def test_partial_vertical_chunk(tmpdir):
 
     numpy.testing.assert_array_equal(c.a.data, d.a.data)
 
+def test_four_processes(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(8))
+            },
+            coords = {
+                'x': np.arange(8),
+            })
+
+    infiles = split_file(tmpdir, d, {'x': 2})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath, np=4)
+
+    numpy.testing.assert_array_equal(c.a.data, d.a.data)
