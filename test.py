@@ -27,6 +27,8 @@ import glob
 import sys
 import numpy.testing
 
+skip_travis = pytest.mark.skipif(os.environ.get('TRAVIS', None) == 'true', reason="Disabled on Travis")
+
 def run_nccopy(options, infiles, outdir):
     try:
         for f in infiles:
@@ -408,6 +410,7 @@ def test_partial_vertical_chunk(tmpdir):
 
     numpy.testing.assert_array_equal(c.a.data, d.a.data)
 
+@skip_travis
 def test_four_processes(tmpdir):
     d = xarray.Dataset(
             {
