@@ -448,21 +448,23 @@ int main(int argc, char ** argv) {
     }
 
     error_t argp_error = argp_parse(&argp, argc, argv, argp_flags, &arg_index, &args);
-    if (args.output == NULL) {
-        fprintf(stderr, "ERROR: No output file specified\n");
-        exit(-1);
-    }
-    if (arg_index == argc) {
-        fprintf(stderr, "ERROR: No input files specified\n");
-        exit(-1);
-    }
-    if (comm_size < 2) {
-        fprintf(stderr, "ERROR: Please run with at least 2 MPI processes\n");
-        exit(-1);
-    }
-    if (argp_error != 0) {
-        log_message(LOG_ERROR, "ERROR parsing arguments");
-        MPI_Abort(MPI_COMM_WORLD, argp_error);
+    if (comm_rank == 0) {
+        if (args.output == NULL) {
+            log_message(LOG_ERROR, "No output file specified");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (arg_index == argc) {
+            log_message(LOG_ERROR, "No input files specified");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (comm_size < 2) {
+            log_message(LOG_ERROR, "Please run with at least 2 MPI processes");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (argp_error != 0) {
+            log_message(LOG_ERROR, "ERROR parsing arguments");
+            MPI_Abort(MPI_COMM_WORLD, argp_error);
+        }
     }
 
     const char * in_path = argv[arg_index];
@@ -476,7 +478,7 @@ int main(int argc, char ** argv) {
         glob_flags |= GLOB_APPEND;
     }
 
-    if (globs.gl_pathc < 1) {
+    if (globs.gl_pathc < 1 && comm_rank == 0) {
         log_message(LOG_ERROR, "No matching input files found");
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
