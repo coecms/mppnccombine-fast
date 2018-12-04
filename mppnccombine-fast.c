@@ -476,6 +476,11 @@ int main(int argc, char ** argv) {
         glob_flags |= GLOB_APPEND;
     }
 
+    if (globs.gl_pathc < 1) {
+        log_message(LOG_ERROR, "No matching input files found");
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
     int writer_rank = 0;
 
     if (comm_rank == writer_rank) {

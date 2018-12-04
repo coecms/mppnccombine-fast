@@ -426,3 +426,13 @@ def test_four_processes(tmpdir):
     c = run_collate(infiles, outpath, np=4)
 
     numpy.testing.assert_array_equal(c.a.data, d.a.data)
+
+def test_no_match(tmpdir):
+    """
+    Error if the input file is missing
+    """
+    infile = str(tmpdir.join('missing.nc'))
+    outpath = tmpdir.join('out.nc')
+
+    with pytest.raises(subprocess.CalledProcessError):
+        c = run_collate([infile], outpath)
