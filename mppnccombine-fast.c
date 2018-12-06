@@ -26,6 +26,7 @@
 #include <mpi.h>
 #include <unistd.h>
 #include <glob.h>
+#include <time.h>
 
 #include "error.h"
 #include "async.h"
@@ -123,6 +124,24 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
     // Copy global attributes
     copy_attrs(out_file, NC_GLOBAL, in_file, NC_GLOBAL, natts);
 
+    // Get count of unlimited dimensions
+    err = nc_inq_unlimdims(in_file, NULL, NULL);
+    int nunlimdim;
+    if (err != NC_ENOTNC4) {
+        NCERR(nc_inq_unlimdims(in_file, &nunlimdim, NULL));
+    } else {
+        nunlimdim = 1;
+    }
+
+    // Get the dimension ids
+    int unlimdims[nunlimdim];
+    if (err != NC_ENOTNC4) {
+        NCERR(nc_inq_unlimdims(in_file, NULL, unlimdims));
+    } else {
+        NCERR(nc_inq_unlimdim(in_file, unlimdims));
+        if (unlimdims[0] < 0) nunlimdim = 0;
+    }
+
     // Copy dimensions
     for (int d=0; d<ndims;++d) {
         char name[NC_MAX_NAME+1];
@@ -131,12 +150,24 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         int varid;
 
         NCERR(nc_inq_dim(in_file, d, name, &len));
+        log_message(LOG_DEBUG, "checking variable %s", name);
 
         // Check if the variable with the same name is collated
-        NCERR(nc_inq_varid(in_file, name, &varid));
-        if (is_collated(in_file, varid)) {
-            // If so get the full length
-            get_collated_dim_len(in_file, name, &len);
+        err = nc_inq_varid(in_file, name, &varid);
+        if (err == NC_ENOTVAR) {
+            // No associated variable
+            continue;
+        } else {
+            NCERR(err);
+
+            if (is_collated(in_file, varid)) {
+                // If so get the full length
+                get_collated_dim_len(in_file, name, &len);
+            }
+        }
+
+        for (int ud=0; ud<nunlimdim; ++ud) {
+            if (d == unlimdims[ud]) len = NC_UNLIMITED;
         }
 
         // Create the out dim
@@ -161,28 +192,26 @@ void init(const char * in_path, const char * out_path, const struct args_t * arg
         int out_v;
         NCERR(nc_def_var(out_file, name, type, ndims, dimids, &out_v));
 
-        // Chunking needs to be identical in 'in' and 'out' files
-        if (is_collated(in_file, v)) {
-            int storage;
-            size_t chunk[ndims];
-            NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
-            if (storage == NC_CHUNKED) {
-                NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
-            }
+        // Set up chunking
+        int storage;
+        size_t chunk[ndims];
+        NCERR(nc_inq_var_chunking(in_file, v, &storage, chunk));
+        if (storage == NC_CHUNKED) {
+            NCERR(nc_def_var_chunking(out_file, out_v, storage, chunk));
+        }
 
-            // Compression needs to be identical in 'in' and 'out' files
-            int shuffle;
-            int deflate;
-            int deflate_level;
-            NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
+        // Set up compression
+        int shuffle;
+        int deflate;
+        int deflate_level;
+        NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
 
-            // Option to override compression
-            if (args->deflate_level != -1) deflate_level = args->deflate_level; 
-            if (args->shuffle != -1) shuffle = args->shuffle; 
+        // Option to override compression
+        if (args->deflate_level != -1) deflate_level = args->deflate_level; 
+        if (args->shuffle != -1) shuffle = args->shuffle; 
 
-            if (shuffle || deflate) {
-                NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
-            }
+        if (shuffle || deflate) {
+            NCERR(nc_def_var_deflate(out_file, out_v, shuffle, deflate, deflate_level));
         }
 
         // Copy attributes
@@ -239,6 +268,82 @@ void file_match_check(bool test, const char * filea, const char * fileb, const c
         fprintf(stderr, "ERROR: %s <%s> <%s>\n", message, filea, fileb);
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
+}
+
+void add_metadata(const char * file, int argc, char ** const argv) {
+    int ncid;
+    NCERR(nc_open(file, NC_WRITE, &ncid));
+
+    // Remove decomposition info from collated variables
+    int nvars;
+    NCERR(nc_inq_nvars(ncid, &nvars));
+    for (int v=0; v<nvars; ++v) {
+        int err = nc_del_att(ncid, v, "domain_decomposition");
+        if (err == NC_ENOTATT) continue;
+        NCERR(err);
+    }
+
+    // Build up a string with the command line
+    size_t argv_len[argc];
+    size_t total_len = 0;
+    for (int a=0; a<argc; ++a) {
+        argv_len[a] = strlen(argv[a]) + 1;
+        total_len += argv_len[a];
+    }
+    char * commandline = malloc(total_len);
+    size_t offset=0;
+    for (int a=0; a<argc; ++a) {
+       memcpy(commandline+offset, argv[a], argv_len[a]);
+       offset += argv_len[a];
+       commandline[offset-1] = ' ';
+    }
+    commandline[total_len-1] = '\0';
+    
+    if (total_len > 100) {
+        log_message(LOG_WARNING, "WARNING: Output file history is long, "
+                    "consider escaping wildcards like `./mppnccombine-fast "
+                    "input.nc.\\* -o output.nc`");
+    }
+
+    // Get the current time
+    time_t now = time(NULL);
+    struct tm * time_tm = gmtime(&now);
+
+    char timestamp[4 + 2 + 2 + 1 + 2 + 2 + 3];
+    int err = strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%MZ:", time_tm);
+    if (err == 0) { 
+        CERR(-1, "Error calculating timestamp");
+    }
+
+    // Get the old history
+    size_t old_history_len;
+    err = nc_inq_attlen(ncid, NC_GLOBAL, "history", &old_history_len);
+    if (err == NC_ENOTATT) {
+        log_message(LOG_DEBUG, "No previous history");
+        old_history_len = 0;
+    }
+
+    size_t history_len = old_history_len + sizeof(timestamp) + total_len;
+    log_message(LOG_DEBUG, "History length %zu", history_len);
+    char * history = malloc(history_len);
+
+    if (old_history_len > 0) {
+        NCERR(nc_get_att_text(ncid, NC_GLOBAL, "history", history));
+        log_message(LOG_DEBUG, "%s", history);
+        history[old_history_len-1] = '\n';
+    }
+
+    memcpy(history+old_history_len, timestamp, sizeof(timestamp));
+    log_message(LOG_DEBUG, "%s", history);
+    history[old_history_len+sizeof(timestamp)-1] = ' ';
+    memcpy(history+old_history_len+sizeof(timestamp), commandline, total_len);
+    log_message(LOG_DEBUG, "%s", history);
+
+    NCERR(nc_put_att_text(ncid, NC_GLOBAL, "history", history_len, history));
+
+    free(history);
+    free(commandline);
+    NCERR(nc_close(ncid));
 }
 
 static char doc[] = "\nQuickly collate MOM model files\n\nGathers the INPUT MOM model files (provided e.g. with a shell glob) and joins them along their horizontal dimensions into a single NetCDF file";
@@ -343,21 +448,23 @@ int main(int argc, char ** argv) {
     }
 
     error_t argp_error = argp_parse(&argp, argc, argv, argp_flags, &arg_index, &args);
-    if (args.output == NULL) {
-        fprintf(stderr, "ERROR: No output file specified\n");
-        exit(-1);
-    }
-    if (arg_index == argc) {
-        fprintf(stderr, "ERROR: No input files specified\n");
-        exit(-1);
-    }
-    if (comm_size < 2) {
-        fprintf(stderr, "ERROR: Please run with at least 2 MPI processes\n");
-        exit(-1);
-    }
-    if (argp_error != 0) {
-        log_message(LOG_ERROR, "ERROR parsing arguments");
-        MPI_Abort(MPI_COMM_WORLD, argp_error);
+    if (comm_rank == 0) {
+        if (args.output == NULL) {
+            log_message(LOG_ERROR, "No output file specified");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (arg_index == argc) {
+            log_message(LOG_ERROR, "No input files specified");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (comm_size < 2) {
+            log_message(LOG_ERROR, "Please run with at least 2 MPI processes");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (argp_error != 0) {
+            log_message(LOG_ERROR, "ERROR parsing arguments");
+            MPI_Abort(MPI_COMM_WORLD, argp_error);
+        }
     }
 
     const char * in_path = argv[arg_index];
@@ -369,6 +476,11 @@ int main(int argc, char ** argv) {
     for (int i=arg_index; i < argc; ++i) {
         glob(argv[i], glob_flags, NULL, &globs);
         glob_flags |= GLOB_APPEND;
+    }
+
+    if (globs.gl_pathc < 1 && comm_rank == 0) {
+        log_message(LOG_ERROR, "No matching input files found");
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
     int writer_rank = 0;
@@ -386,6 +498,9 @@ int main(int argc, char ** argv) {
         size_t total_size = run_async_writer(out_path);
         double t_end = MPI_Wtime();
         double total_size_gb = total_size / pow(1024,3);
+
+        // Clean up attributes & add to history
+        add_metadata(out_path, argc, argv);
 
         fprintf(stdout, "\nTotal compressed size %.2f GiB | Time %.2fs | %.2f MiB / sec\n",
                 total_size_gb, t_end - t_start, total_size / pow(1024,2) /(t_end - t_start));
@@ -424,7 +539,7 @@ int main(int argc, char ** argv) {
     log_message(LOG_DEBUG, "Cleanup glob");
     globfree(&globs);
     log_message(LOG_DEBUG, "Cleanup win");
-    MPI_Win_free(&current_file_win);
+    //MPI_Win_free(&current_file_win);
 
     log_message(LOG_DEBUG, "MPI_Finalize");
     return MPI_Finalize();

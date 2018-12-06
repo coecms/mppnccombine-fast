@@ -25,6 +25,9 @@ import pytest
 import os
 import glob
 import sys
+import numpy.testing
+
+skip_travis = pytest.mark.skipif(os.environ.get('TRAVIS', None) == 'true', reason="Disabled on Travis")
 
 def run_nccopy(options, infiles, outdir):
     try:
@@ -111,6 +114,7 @@ def test_simple(tmpdir):
     c = run_collate([inpath], outpath)
 
     assert (c.a.data == d.a.data).all()
+    numpy.testing.assert_array_equal(c.a.data, d.a.data)
 
 
 def test_split_on_boundary(tmpdir):
@@ -129,6 +133,8 @@ def test_split_on_boundary(tmpdir):
 
     assert (c.a.data == d.a.data).all()
     assert (c.x.data == d.x.data).all()
+    
+    assert 'domain_decomposition' not in c.x.attrs
 
 
 def test_split_off_boundary(tmpdir):
@@ -296,6 +302,54 @@ def test_1degree_nc3(tmpdir):
 
     assert d.equals(c)
 
+def test_unlimited(tmpdir):
+    inpath = str(tmpdir.join('test.nc'))
+    outpath = tmpdir.join('out1.nc')
+    d = xarray.Dataset(
+            {
+                'a': (['time','x'], np.random.rand(6,5))
+            },
+            coords = {
+                'x': np.arange(5),
+                'time': np.arange(6),
+            })
+
+    d.to_netcdf(inpath,
+            unlimited_dims = ['time'],
+            encoding={
+            'a': {
+                'chunksizes': (2,2),
+                'zlib': True,
+                'shuffle': True,
+                'complevel': 4,
+                },
+        })
+    c = run_collate([inpath], outpath)
+    assert c.encoding['unlimited_dims'] == set(['time'])
+
+    outpath = tmpdir.join('out2.nc')
+    d = xarray.Dataset(
+            {
+                'a': (['time','x'], np.random.rand(1,5))
+            },
+            coords = {
+                'x': np.arange(5),
+                'time': np.arange(1),
+            })
+
+    d.to_netcdf(inpath,
+            unlimited_dims = ['time'],
+            encoding={
+            'a': {
+                'chunksizes': (1,2),
+                'zlib': True,
+                'shuffle': True,
+                'complevel': 4,
+                },
+        })
+    c = run_collate([inpath], outpath, args=['--force'])
+    assert c.encoding['unlimited_dims'] == set(['time'])
+
 def test_many_files(tmpdir):
     d = xarray.Dataset(
             {
@@ -311,3 +365,74 @@ def test_many_files(tmpdir):
     c = run_collate([tmpdir.join('*.nc')], outpath)
 
     assert d.equals(c)
+
+def test_min_dim(tmpdir):
+    """
+    Minimum domain value should be respected 
+    """
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(4))
+            },
+            coords = {
+                'x': np.arange(4),
+            })
+    d['x'].attrs['domain_decomposition'] = [101, 104, 101, 104]
+
+    infile = str(tmpdir.join('offset.nc'))
+    d.to_netcdf(infile, encoding={'a':{'chunksizes':(2,)}})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate([infile], outpath)
+
+    assert c.x.size == 4
+
+def test_partial_vertical_chunk(tmpdir):
+    inpath = str(tmpdir.join('test.nc'))
+    outpath = tmpdir.join('out.nc')
+    d = xarray.Dataset(
+            {
+                'a': (['z','x'], numpy.zeros((3,1)))
+            },
+            coords = {
+                'x': np.arange(1),
+                'z': np.arange(3),
+            })
+    d.x.attrs['domain_decomposition'] = [1, 1, 1, 1]
+
+    d.to_netcdf(inpath, encoding={
+            'a': {
+                'chunksizes': (2,1),
+                },
+        })
+
+    c = run_collate([inpath], outpath)
+
+    numpy.testing.assert_array_equal(c.a.data, d.a.data)
+
+@skip_travis
+def test_four_processes(tmpdir):
+    d = xarray.Dataset(
+            {
+                'a': (['x'], np.random.rand(8))
+            },
+            coords = {
+                'x': np.arange(8),
+            })
+
+    infiles = split_file(tmpdir, d, {'x': 2})
+
+    outpath = tmpdir.join('out.nc')
+    c = run_collate(infiles, outpath, np=4)
+
+    numpy.testing.assert_array_equal(c.a.data, d.a.data)
+
+def test_no_match(tmpdir):
+    """
+    Error if the input file is missing
+    """
+    infile = str(tmpdir.join('missing.nc'))
+    outpath = tmpdir.join('out.nc')
+
+    with pytest.raises(subprocess.CalledProcessError):
+        c = run_collate([infile], outpath)
