@@ -1,4 +1,5 @@
 # mppnccombine-fast
+[![DOI](https://zenodo.org/badge/131938571.svg)](https://zenodo.org/badge/latestdoi/131938571)
 
 An accelerated version of the `mppnccombine` post-processing tool for MOM
 
