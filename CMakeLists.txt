@@ -31,6 +31,14 @@ find_library(NETCDF_LIB
 	PATH SUFFIXES lib
 	)
 
+find_program(CLANG_TIDY
+	NAMES clang-tidy
+	)
+if (CLANG_TIDY)
+	set_target_properties(mppnccombine-fast PROPERTIES
+		C_CLANG_TIDY "${CLANG_TIDY};-checks=*")
+endif()
+
 target_compile_definitions(mppnccombine-fast PRIVATE ${MPI_C_COMPILE_DEFINITIONS})
 target_compile_options(mppnccombine-fast PRIVATE ${MPI_C_COMPILE_OPTIONS})
 target_link_libraries(mppnccombine-fast PUBLIC
