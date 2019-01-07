@@ -7,5 +7,5 @@ before_install:
     - conda create --yes -c conda-forge -n build gcc openmpi 'hdf5>=1.10.2' libnetcdf nomkl pytest netcdf4 xarray
 
 script:
-    - source ~/conda/env/build/bin/activate
+    - conda activate build
     - make mppnccombine-fast
