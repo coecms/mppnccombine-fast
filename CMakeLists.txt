@@ -4,6 +4,17 @@ include(FindMPI)
 
 add_executable(mppnccombine-fast mppnccombine-fast.c async.c error.c read_chunked.c)
 
+set_target_properties(mppnccombine-fast PROPERTIES
+	C_STANDARD 11)
+add_compile_options(-Wall)
+
+if (${C_COMPILER_ID} MATCHES GNU)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+elseif (${C_COMPILER_ID} MATCHES Clang)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+elseif (${C_COMPILER_ID} MATCHES Intel)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+endif()
 
 find_path(HDF5_INCLUDE_DIRECTORY
 	NAMES hdf5.h
