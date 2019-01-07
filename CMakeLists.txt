@@ -47,7 +47,7 @@ find_program(CLANG_TIDY
 	)
 if (CLANG_TIDY)
 	set_target_properties(mppnccombine-fast PROPERTIES
-		C_CLANG_TIDY "${CLANG_TIDY};-checks=*")
+		C_CLANG_TIDY "${CLANG_TIDY};-checks=*,-hicpp-signed-bitwise;-warnings-as-errors=*")
 endif()
 
 target_compile_definitions(mppnccombine-fast PRIVATE ${MPI_C_COMPILE_DEFINITIONS})

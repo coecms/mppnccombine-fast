@@ -7,3 +7,4 @@ all .DEFAULT:
 clean:
 	${RM} -r ${BUILD_DIR}
 
+.SUFFIXES:
