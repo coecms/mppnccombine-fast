@@ -8,4 +8,4 @@ before_install:
 
 script:
     - conda activate build
-    - make
+    - make check
