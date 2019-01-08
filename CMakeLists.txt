@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
 project(mppnccombine-fast)
 
-set(MPI_C_ADDITIONAL_INCLUDE_DIRS $ENV{OPENMPI_ROOT}/include)
-set(MPI_CXX_ADDITIONAL_INCLUDE_DIRS $ENV{OPENMPI_ROOT}/include)
+if (DEFINED ENV{OPENMPI_ROOT})
+        set(MPI_C_ADDITIONAL_INCLUDE_DIRS $ENV{OPENMPI_ROOT}/include)
+        set(MPI_CXX_ADDITIONAL_INCLUDE_DIRS $ENV{OPENMPI_ROOT}/include)
+endif()
 include(FindMPI)
 
 add_executable(mppnccombine-fast mppnccombine-fast.c async.c error.c read_chunked.c)
