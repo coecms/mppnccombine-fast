@@ -18,15 +18,15 @@
 #define _GNU_SOURCE
 
 #include "error.h"
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "hdf5.h"
 #include "mpi.h"
 #include "netcdf.h"
 
 #include <execinfo.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 void print_backtrace(void) {
@@ -77,9 +77,13 @@ void log_message(int level, const char *message, ...) {
     va_start(vargs, message);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     char *rendered;
-    vasprintf(&rendered, message, vargs);
-    fprintf(stderr, "[rank %03d] %s\n", rank, rendered);
-    free(rendered);
+    int err = vasprintf(&rendered, message, vargs);
+    if (err == 0) {
+        fprintf(stderr, "[rank %03d] %s\n", rank, rendered);
+        free(rendered);
+    } else {
+        fprintf(stderr, "[rank %03d] %s\n", rank, "Unknown error");
+    }
     va_end(vargs);
   }
 }

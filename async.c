@@ -357,7 +357,6 @@ void write_chunk_async(varid_t var, size_t ndims, uint32_t filter_mask,
                        const hsize_t offset[], size_t data_size, const void *buffer,
                        int async_writer_rank, MPI_Request *request) {
   *request = MPI_REQUEST_NULL;
-  MPI_Request requests[4];
 
   log_message(LOG_DEBUG, "SEND raw write %d", var);
   MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank, TAG_WRITE_CHUNK,

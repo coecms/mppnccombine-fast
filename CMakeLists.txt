@@ -6,7 +6,7 @@ add_compile_options(-Wall -Wextra)
 if (${C_COMPILER_ID} MATCHES GNU)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 elseif (${C_COMPILER_ID} MATCHES Clang)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-missing-field-initializers")
 elseif (${C_COMPILER_ID} MATCHES Intel)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 endif()
@@ -58,7 +58,7 @@ find_program(CLANG_TIDY
         )
 if (CLANG_TIDY)
         set_target_properties(mppnccombine-fast PROPERTIES
-                C_CLANG_TIDY "${CLANG_TIDY};-checks=*,-hicpp-signed-bitwise;-warnings-as-errors=*")
+                C_CLANG_TIDY "${CLANG_TIDY};-checks=*,-hicpp-signed-bitwise,-clang-diagnostic-missing-field-initializers;-warnings-as-errors=*")
 endif()
 
 # Install

@@ -200,6 +200,9 @@ void copy_netcdf_variable_chunks(varid_t var, int ncid, int varid, int ndims,
     total_chunks *= nchunks[i];
     chunk_size *= chunk[i];
   }
+  if (chunk_size > (size_t)2<<30) {
+    CERR(-1, "Chunk size too large");
+  }
 
   void *buffer = malloc(chunk_size * sizeof(double));
   nc_type type;

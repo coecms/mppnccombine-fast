@@ -61,6 +61,9 @@ void copy_netcdf(int ncid_out, int varid_out, int ncid_in, int varid_in) {
     size *= local_size[d];
     in_offset[d] = 0;
   }
+  if (size > (size_t)2<<30) {
+    CERR(-1, "Variable size too large");
+  }
 
   // Enough size for float64_t
   void *buffer = malloc(size * 8);
@@ -540,7 +543,7 @@ int main(int argc, char **argv) {
             total_size / pow(1024, 2) / (t_end - t_start));
   } else {
     int increment = 1;
-    int my_file_idx = -1;
+    unsigned int my_file_idx = -1;
 
     log_message(LOG_DEBUG, "Starting read");
 
@@ -567,7 +570,7 @@ int main(int argc, char **argv) {
 
   if (comm_rank == writer_rank && args.remove) {
     log_message(LOG_INFO, "Cleaning inputs");
-    for (int my_file_idx = 0; my_file_idx < globs.gl_pathc; ++my_file_idx) {
+    for (unsigned int my_file_idx = 0; my_file_idx < globs.gl_pathc; ++my_file_idx) {
       log_message(LOG_DEBUG, "unlink %s", globs.gl_pathv[my_file_idx]);
       unlink(globs.gl_pathv[my_file_idx]);
     }
