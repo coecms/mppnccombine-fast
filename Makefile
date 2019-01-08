@@ -3,9 +3,14 @@ BUILD_TYPE?=Release
 
 CMAKE_FLAGS=-DCMAKE_BUILD_TYPE=${BUILD_TYPE}
 
+ifdef PREFIX
+    CMAKE_FLAGS+= -DCMAKE_INSTALL_PREFIX=${PREFIX}
+endif
+
 ifneq (,$(findstring raijin,${HOSTNAME}))
-    BUILD_ENV=module load cmake/3.12.2 intel-cc/2019.0.117 netcdf/4.6.1 hdf5/1.10.2 openmpi/3.0.1;
-    TEST_ENV=module load conda openmpi/3.0.1;
+    # raijin.nci.org.au build environment
+    BUILD_ENV=module purge; module load cmake/3.12.2 intel-cc/2019.0.117 netcdf/4.6.1 hdf5/1.10.2 openmpi/3.0.1;
+    TEST_ENV=module purge; module load conda openmpi/3.0.1;
 endif
 
 all .DEFAULT:

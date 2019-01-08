@@ -9,11 +9,23 @@ mppnccombine, to 6 minutes with mppnccombine-fast running with 16 processes
 
 ## Build
 
-`mppnccombine-fast` requires HDF5 version 1.10.2 or above
+`mppnccombine-fast` requires HDF5 version 1.10.2 or above, as well as NetCDF 4,
+a C compiler and a MPI library.
 
-On Raijin (this will automatically load the modules):
+Cmake is used for building. A Makefile is also provided for ease of use:
 
-    make
+    make # Release build
+
+    make BUILD_TYPE=Debug # Debug build
+
+    make check # Run tests
+
+    make PREFIX=/apps/mppncc-fast install # Install mppnccombine-fast to $PREFIX
+
+On Raijin the Makefile loads all required modules
+
+The environment variables `$OPENMPI_ROOT`, `$HDF5_ROOT` and `$NETCDF_ROOT` may
+be used to help locate libraries at other sites
 
 ## Use
 
