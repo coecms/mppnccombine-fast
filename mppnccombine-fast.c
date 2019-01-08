@@ -387,7 +387,6 @@ static struct argp_option opts[] = {
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
   struct args_t *args = state->input;
-  int err;
   int rank;
   char *endptr;
 
