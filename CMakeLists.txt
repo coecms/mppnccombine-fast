@@ -59,3 +59,10 @@ target_link_libraries(mppnccombine-fast PUBLIC
 target_include_directories(mppnccombine-fast PRIVATE
         ${HDF5_INCLUDE_DIRECTORY}
         ${NETCDF_INCLUDE_DIRECTORY})
+
+install(TARGETS mppnccombine-fast
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        INCLUDES DESTINATION include
+        )
