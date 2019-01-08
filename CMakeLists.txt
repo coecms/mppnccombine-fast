@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(mppnccombine-fast)
 
 # Compiler-specific options
-add_compile_options(-Wall)
+add_compile_options(-Wall -Wextra)
 if (${C_COMPILER_ID} MATCHES GNU)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 elseif (${C_COMPILER_ID} MATCHES Clang)

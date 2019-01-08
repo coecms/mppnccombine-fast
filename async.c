@@ -237,7 +237,6 @@ void write_uncompressed_async(varid_t var, size_t ndims,
                               nc_type type, int async_writer_rank,
                               MPI_Request *request) {
   *request = MPI_REQUEST_NULL;
-  MPI_Request requests[4];
 
   // Send the variable ID we want to write to
   log_message(LOG_DEBUG, "SEND write variable %d", var);
