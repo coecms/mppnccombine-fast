@@ -1,4 +1,4 @@
-/** 
+/* 
  * Copyright 2018 
  *
  * \author   <scott.wales@unimelb.edu.au>
