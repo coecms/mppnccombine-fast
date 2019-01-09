@@ -8,6 +8,8 @@ Uses HDF5's raw IO functions to speed up collating large datasets - a 0.1
 degree model goes from taking 4 hours to collate a compressed variable with
 mppnccombine, to 6 minutes with mppnccombine-fast running with 16 processes
 
+Documentation at https://mppnccombine-fast.readthedocs.io
+
 ## Build
 
 `mppnccombine-fast` requires HDF5 version 1.10.2 or above, as well as NetCDF 4,
