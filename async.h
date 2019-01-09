@@ -61,7 +61,7 @@ void write_chunk_async(
     varid_t var,
     size_t ndims,
     uint32_t filter_mask,
-    hsize_t offset[],
+    const hsize_t offset[],
     size_t data_size,
     const void * buffer,
     int async_writer_rank,

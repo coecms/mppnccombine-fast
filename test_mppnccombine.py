@@ -44,7 +44,7 @@ def run_nccopy(options, infiles, outdir):
 # Run the collation program
 def run_collate(inputs, output, np=2, args=[]):
     try:
-        command = ['mpirun', '--mca', 'btl', 'self,tcp', '--oversubscribe', '-n', '%d'%np, './mppnccombine-fast', '-o', str(output)] + inputs + args
+        command = ['mpirun', '--mca', 'btl', 'self,tcp', '--oversubscribe', '-n', '%d'%np, 'mppnccombine-fast', '-o', str(output)] + inputs + args
         print(' '.join(['%s'%x for x in command]))
         subprocess.run(
             command,

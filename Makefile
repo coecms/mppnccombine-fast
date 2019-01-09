@@ -1,34 +1,26 @@
-CC      = ${COMPILER_ENV} mpicc
-#CFLAGS  = -std=c99 -Wall -Werror -check-pointers=rw -g -O0 -traceback
-CFLAGS  = -std=c99 -Wall -Wextra -g -O2
-LDLIBS  = -lnetcdf -lhdf5_hl -lhdf5 -lm
+BUILD_DIR=build
+BUILD_TYPE?=Release
 
-ifneq ($(filter raijin%, ${HOSTNAME}),)
-    # Setup the Raijin environment
-    COMPILER_ENV = module purge; module load intel-cc openmpi/3.0.1 netcdf/4.6.1 hdf5/1.10.2 scorep/3.1; ${SCOREP}
-    TEST_ENV     = module purge; module use /g/data3/hh5/public/modules; module load conda openmpi/3.0.1;
+CMAKE_FLAGS=-DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+
+ifdef PREFIX
+    CMAKE_FLAGS+= -DCMAKE_INSTALL_PREFIX=${PREFIX}
 endif
 
-ifneq (${CONDA_BUILD},)
-    # Load dependencies from conda
-    # conda create -c conda-forge -n mppnccombine-fast-build gcc openmpi 'hdf5>=1.10.2' libnetcdf
-    # conda create -c conda-forge -n mppnccombine-fast-test openmpi pytest xarray
-    # Run 'conda activate' first so 'source' will work
-    SHELL = bash
-    COMPILER_ENV = source activate mppnccombine-fast-build;
-    TEST_ENV = source activate mppnccombine-fast-test;
+ifneq (,$(findstring raijin,${HOSTNAME}))
+    # raijin.nci.org.au build environment
+    BUILD_ENV=module purge; module load cmake/3.12.2 intel-cc/2019.0.117 netcdf/4.6.1 hdf5/1.10.2 openmpi/3.0.1;
+    TEST_ENV=module purge; module load conda openmpi/3.0.1;
 endif
 
-ifneq (${PROFILE},)
-    CFLAGS += -fprofile-arcs -ftest-coverage
-endif
-
-all: mppnccombine-fast
-
-test check: mppnccombine-fast
-	${TEST_ENV} pytest -v --capture=no test.py
-
-mppnccombine-fast: async.o error.o read_chunked.o
+all .DEFAULT:
+	mkdir -p ${BUILD_DIR}
+	${BUILD_ENV} cd ${BUILD_DIR} && cmake ${CMAKE_FLAGS} ${CURDIR} && ${MAKE} $@
 
 clean:
-	${RM} mppnccombine-fast *.o
+	${RM} -r ${BUILD_DIR}
+
+check test: mppnccombine-fast
+	${TEST_ENV} PATH=${BUILD_DIR}:$$PATH py.test
+
+.SUFFIXES:
