@@ -49,10 +49,11 @@ read_chunked.h
 Functions the Readers use to read chunks from the input files and send them to
 the Writer
 
+.. doxygenfunction:: is_collated
+.. doxygenfunction:: get_collation_info
+
 .. doxygenfunction:: get_collated_dim_decomp
 .. doxygenfunction:: get_collated_dim_len
-.. doxygenfunction:: get_collation_info
-.. doxygenfunction:: is_collated
 
 .. doxygenfunction:: copy_chunked
 
