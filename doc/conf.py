@@ -12,9 +12,14 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
+import subprocess
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
+
+# Generate Doxygen xml files
+if os.environ.get('READTHEDOCS', None) == 'True':
+    subprocess.call('cd ..; doxygen', shell=True)
 
 
 # -- Project information -----------------------------------------------------
@@ -41,7 +46,11 @@ release = ''
 extensions = [
     'sphinx.ext.githubpages',
     'sphinx.ext.graphviz',
+    'breathe',
 ]
+
+breathe_projects = {'default': './doxygen-xml'}
+breathe_default_project = 'default'
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -69,6 +78,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = None
+
+primary_domain = 'cpp'
 
 
 # -- Options for HTML output -------------------------------------------------

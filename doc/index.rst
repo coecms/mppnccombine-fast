@@ -11,6 +11,7 @@ Welcome to mppnccombine-fast's documentation!
    :caption: Contents:
 
    overview
+   mppnccombine-fast
 
 
 

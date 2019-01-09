@@ -73,7 +73,7 @@ The Async Write Loop
 The Async write loop is set up to handle a number of messages that the Readers
 will send to the Writer
 
- * :func:`open_variable_async()`: Obtain a handle to a variable in the output
+ * :cpp:func:`open_variable_async`: Obtain a handle to a variable in the output
    file
  * :func:`variable_info_async()`: Obtain chunking and compression information
    for a variable
@@ -84,3 +84,7 @@ will send to the Writer
  * :func:`close_variable_async()`: Return the variable handle
  * :func:`close_async()`: Reports that the Reader will not send any more
    messages
+
+The Writer asyncronously polls for these messages in
+:func:`run_async_writer()`, then actions them in
+:func:`receive_open_variable_async()` etc.
