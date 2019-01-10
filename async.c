@@ -154,14 +154,14 @@ void variable_info_async(varid_t varid, size_t ndims, uint64_t chunk[],
                          int async_writer_rank) {
 
   // Send the variable ID we want to write to
-  log_message(LOG_DEBUG, "SEND info variable %d", var);
-  MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank, TAG_VAR_INFO,
+  log_message(LOG_DEBUG, "SEND info variable %d", varid);
+  MPI_Ssend(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_VAR_INFO,
             MPI_COMM_WORLD);
 
   uint64_t varinfo[ndims + 3];
   MPI_Recv(varinfo, ndims + 3, MPI_UINT64_T, async_writer_rank, TAG_VAR_INFO,
            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-  log_message(LOG_DEBUG, "RECV info variable %d", var);
+  log_message(LOG_DEBUG, "RECV info variable %d", varid);
 
   for (size_t d = 0; d < ndims; ++d) {
     chunk[d] = varinfo[d];
@@ -239,8 +239,8 @@ void write_uncompressed_async(varid_t varid, size_t ndims,
   *request = MPI_REQUEST_NULL;
 
   // Send the variable ID we want to write to
-  log_message(LOG_DEBUG, "SEND write variable %d", var);
-  MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank, TAG_WRITE_FILTER,
+  log_message(LOG_DEBUG, "SEND write variable %d", varid);
+  MPI_Ssend(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_WRITE_FILTER,
             MPI_COMM_WORLD);
 
   // Pack chunk information into a vector
@@ -269,7 +269,7 @@ void write_uncompressed_async(varid_t varid, size_t ndims,
   int receipt;
   MPI_Recv(&receipt, 1, MPI_INT, async_writer_rank, TAG_WRITE_FILTER,
            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-  log_message(LOG_DEBUG, "RECEIPT write variable %d", var);
+  log_message(LOG_DEBUG, "RECEIPT write variable %d", varid);
 }
 
 static size_t receive_write_uncompressed_async(async_state_t *state,
@@ -358,8 +358,8 @@ void write_chunk_async(varid_t varid, size_t ndims, uint32_t filter_mask,
                        int async_writer_rank, MPI_Request *request) {
   *request = MPI_REQUEST_NULL;
 
-  log_message(LOG_DEBUG, "SEND raw write %d", var);
-  MPI_Ssend(&(var.idx), 1, MPI_INT, async_writer_rank, TAG_WRITE_CHUNK,
+  log_message(LOG_DEBUG, "SEND raw write %d", varid);
+  MPI_Ssend(&(varid.idx), 1, MPI_INT, async_writer_rank, TAG_WRITE_CHUNK,
             MPI_COMM_WORLD);
 
   uint64_t ndims_ = ndims;
@@ -375,18 +375,18 @@ void write_chunk_async(varid_t varid, size_t ndims, uint32_t filter_mask,
   MPI_Ssend(offset_, ndims, MPI_UINT64_T, async_writer_rank,
             TAG_WRITE_CHUNK_OFFSET, MPI_COMM_WORLD);
 
-  log_message(LOG_DEBUG, "WAIT raw write %d", var);
+  log_message(LOG_DEBUG, "WAIT raw write %d", varid);
 
   MPI_Ssend(buffer, data_size, MPI_CHAR, async_writer_rank,
             TAG_WRITE_CHUNK_DATA, MPI_COMM_WORLD);
 
   MPI_Wait(request, MPI_STATUS_IGNORE);
-  log_message(LOG_DEBUG, "SEND raw write %d done", var);
+  log_message(LOG_DEBUG, "SEND raw write %d done", varid);
 
   int receipt;
   MPI_Recv(&receipt, 1, MPI_INT, async_writer_rank, TAG_WRITE_CHUNK,
            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-  log_message(LOG_DEBUG, "RECEIPT write variable %d", var);
+  log_message(LOG_DEBUG, "RECEIPT write variable %d", varid);
 }
 
 static size_t receive_write_chunk_async(async_state_t *state,
