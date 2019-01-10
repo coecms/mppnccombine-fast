@@ -1,5 +1,5 @@
-/** 
- * Copyright 2018 
+/**
+ * Copyright 2018
  *
  * \author   <scott.wales@unimelb.edu.au>
  *
@@ -18,69 +18,72 @@
 #define _GNU_SOURCE
 
 #include "error.h"
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
 
 #include "hdf5.h"
-#include "netcdf.h"
 #include "mpi.h"
+#include "netcdf.h"
 
-#include <unistd.h>
 #include <execinfo.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 void print_backtrace(void) {
-    void * stack[10];
-    size_t size = backtrace(stack, 10);
+  void *stack[10];
+  size_t size = backtrace(stack, 10);
 
-    backtrace_symbols_fd(stack, size, STDERR_FILENO);
+  backtrace_symbols_fd(stack, size, STDERR_FILENO);
 }
 
 // NetCDF error handler
-void handle_nc_error(int err, const char * file, int line) {
-    if (err != 0) {
-        const char * message = nc_strerror(err);
+void handle_nc_error(int err, const char *file, int line) {
+  if (err != 0) {
+    const char *message = nc_strerror(err);
 
-        log_message(LOG_ERROR, "ERROR in NetCDF %s:%d %d %s\n", file, line, err, message);
-        print_backtrace();
-        MPI_Abort(MPI_COMM_WORLD, err);
-    }
+    log_message(LOG_ERROR, "ERROR in NetCDF %s:%d %d %s\n", file, line, err,
+                message);
+    print_backtrace();
+    MPI_Abort(MPI_COMM_WORLD, err);
+  }
 }
 
 // HDF5 error handler
-void handle_h5_error(int err, const char * file, int line) {
-    if (err < 0) {
-        log_message(LOG_ERROR, "ERROR in HDF5 %s:%d\n", file, line);
-        H5Eprint1(stderr);
-        print_backtrace();
-        MPI_Abort(MPI_COMM_WORLD, err);
-    }
+void handle_h5_error(int err, const char *file, int line) {
+  if (err < 0) {
+    log_message(LOG_ERROR, "ERROR in HDF5 %s:%d\n", file, line);
+    H5Eprint1(stderr);
+    print_backtrace();
+    MPI_Abort(MPI_COMM_WORLD, err);
+  }
 }
 
-void handle_c_error(int err, const char * message, const char * file, int line) {
-    if (err != 0) {
-        log_message(LOG_ERROR, "ERROR %s:%d %s\n", file, line, message);
-        print_backtrace();
-        MPI_Abort(MPI_COMM_WORLD, err);
-    }
+void handle_c_error(int err, const char *message, const char *file, int line) {
+  if (err != 0) {
+    log_message(LOG_ERROR, "ERROR %s:%d %s\n", file, line, message);
+    print_backtrace();
+    MPI_Abort(MPI_COMM_WORLD, err);
+  }
 }
 
 static int log_level;
 
-void set_log_level(int level) {
-    log_level = level;
-}
+void set_log_level(int level) { log_level = level; }
 
-void log_message(int level, const char * message, ...) {
-    if (level <= log_level) {
-        int rank;
-        va_list vargs;
-        va_start(vargs, message);
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        char * rendered;
-        vasprintf(&rendered, message, vargs);
+void log_message(int level, const char *message, ...) {
+  if (level <= log_level) {
+    int rank;
+    va_list vargs;
+    va_start(vargs, message);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    char *rendered;
+    int err = vasprintf(&rendered, message, vargs);
+    if (err == 0) {
         fprintf(stderr, "[rank %03d] %s\n", rank, rendered);
         free(rendered);
-        va_end(vargs);
+    } else {
+        fprintf(stderr, "[rank %03d] %s\n", rank, "Unknown error");
     }
+    va_end(vargs);
+  }
 }

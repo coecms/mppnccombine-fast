@@ -1,4 +1,4 @@
-/** 
+/* 
  * Copyright 2018 
  *
  * \author   <scott.wales@unimelb.edu.au>
@@ -22,13 +22,31 @@
 extern "C" {
 #endif
 
-// NetCDF error handler
+//! NetCDF error handler
+/**
+ *  If a NetCDF call has errored reports the error and exits
+ *
+ *  \param x: The return code of a NetCDF library call
+ */
 #define NCERR(x) handle_nc_error(x, __FILE__, __LINE__)
 void handle_nc_error(int err, const char * file, int line);
 
+//! HDF5 error handler
+/**
+ *  If a HDF5 call has errored reports the error and exits
+ *
+ *  \param x: The return code of a HDF5 library call
+ */
 #define H5ERR(x) handle_h5_error(x, __FILE__, __LINE__)
 void handle_h5_error(int err, const char * file, int line);
 
+//! C error handler
+/**
+ *  If a C library call has errored reports the error and exits
+ *
+ *  \param x: The return code of a C library call
+ *  \param message: Error message
+ */
 #define CERR(x, message) handle_c_error(x, message, __FILE__, __LINE__)
 void handle_c_error(int err, const char * message, const char * file, int line);
 
@@ -37,7 +55,19 @@ void handle_c_error(int err, const char * message, const char * file, int line);
 #define LOG_WARNING 2
 #define LOG_ERROR 1
 
+//! Set the output level for log messages
+/**
+ *  \param level: Messages with a level less than or equal to this will be
+ *      output
+ */
 void set_log_level(int level);
+
+//! Send a message to the log
+/**
+ *  \param level: Message log level
+ *  \param message: Message (printf-like format string)
+ *  \param ...: Message arguments
+ */
 void log_message(int level, const char * message, ...);
 
 #ifdef __cplusplus
