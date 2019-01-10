@@ -249,10 +249,10 @@ void write_uncompressed_async(varid_t varid, size_t ndims,
   size_t buffer_count = 1;
 
   for (size_t d = 0; d < ndims; ++d) {
-    chunk_data[d] = chunk_offset[d];
-    chunk_data[ndims + d] = chunk_shape[d];
+    chunk_data[d] = offset[d];
+    chunk_data[ndims + d] = shape[d];
 
-    buffer_count *= chunk_shape[d];
+    buffer_count *= shape[d];
   }
 
   chunk_data[2 * ndims] = type;
