@@ -38,6 +38,8 @@ Functions for reporting errors from the various libraries used
 .. doxygenfunction:: set_log_level
 .. doxygenfunction:: log_message
 
+Available log levels are:
+
 .. doxygendefine:: LOG_DEBUG
 .. doxygendefine:: LOG_INFO
 .. doxygendefine:: LOG_WARNING
