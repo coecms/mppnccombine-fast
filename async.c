@@ -149,7 +149,7 @@ hid_t type_nc_to_h5(nc_type type) {
 }
 
 // Get info about a variable
-void variable_info_async(varid_t var, size_t ndims, uint64_t chunk[],
+void variable_info_async(varid_t varid, size_t ndims, uint64_t chunk[],
                          int *deflate, int *deflate_level, int *shuffle,
                          int async_writer_rank) {
 
@@ -231,9 +231,9 @@ void receive_variable_info_async(async_state_t *state, MPI_Status status) {
 }
 
 // Write data to the file, using the dataset filters
-void write_uncompressed_async(varid_t var, size_t ndims,
-                              const size_t chunk_offset[],
-                              const size_t chunk_shape[], const void *buffer,
+void write_uncompressed_async(varid_t varid, size_t ndims,
+                              const size_t offset[],
+                              const size_t shape[], const void *buffer,
                               nc_type type, int async_writer_rank,
                               MPI_Request *request) {
   *request = MPI_REQUEST_NULL;
@@ -353,7 +353,7 @@ static size_t receive_write_uncompressed_async(async_state_t *state,
 }
 
 // Write a chunk in async mode
-void write_chunk_async(varid_t var, size_t ndims, uint32_t filter_mask,
+void write_chunk_async(varid_t varid, size_t ndims, uint32_t filter_mask,
                        const hsize_t offset[], size_t data_size, const void *buffer,
                        int async_writer_rank, MPI_Request *request) {
   *request = MPI_REQUEST_NULL;
