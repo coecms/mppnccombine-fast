@@ -48,10 +48,10 @@ bool get_collated_dim_decomp(int ncid, const char *varname,
 }
 
 // Get the total length of a collated variable
-void get_collated_dim_len(int ncid, const char *varname, size_t *len) {
+size_t get_collated_dim_len(int ncid, const char *varname) {
   int decomposition[4];
   get_collated_dim_decomp(ncid, varname, decomposition);
-  *len = decomposition[1] - (decomposition[0] - 1);
+  return decomposition[1] - (decomposition[0] - 1);
 }
 
 // Get collation info from a variable

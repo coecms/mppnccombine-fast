@@ -173,7 +173,7 @@ void init(const char *in_path, const char *out_path,
 
     if (is_collated(in_file, varid)) {
       // If so get the full length
-      get_collated_dim_len(in_file, name, &len);
+      len = get_collated_dim_len(in_file, name);
     }
 
     for (int ud = 0; ud < nunlimdim; ++ud) {
