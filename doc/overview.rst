@@ -1,10 +1,27 @@
-Overview
-========
+Implementation Overview
+=======================
 
-The basic outline of mppnccombine-fast consists of one "writer" rank and one or
-more "reader" ranks. The "writer" rank handles all writing to the output file,
-while the "reader" ranks read in data from the many files to be collated and
-send the data to the "writer" rank.
+The basic outline of ``mppnccombine-fast`` consists of one "Writer" rank and one or
+more "Reader" ranks. The Writer rank handles all writing to the output file,
+while the Reader ranks read in data from the many files to be collated and
+send the data to the Writer rank.
+
+The main slowdown in copying compressed variables is that the hdf5 library has
+to de-compress them during the read, and re-compress them during the write.
+``mppnccombine-fast`` works around this by using HDF5 1.10.2's direct IO
+functions
+`H5DOwrite_chunk() <https://support.hdfgroup.org/HDF5/doc/HL/RM_HDF5Optimized.html#H5DOwrite_chunk>`_
+and
+`H5DOread_chunk() <https://support.hdfgroup.org/HDF5/doc/HL/RM_HDF5Optimized.html#H5DOread_chunk>`_
+to copy the compressed data from one file to the other directly, rather than
+going through the de-compress/re-compress cycle.
+
+To get a even larger speedup MPI is used to have separate read and write
+processes, since HDF5 IO is a blocking function.
+
+Since the NetCDF4 library is much nicer to use, but doesn't provide public
+access to the underlying HDF5 file, we need to do a bit of musical chairs with
+the files, swapping between NetCDF4 and HDF5 modes by re-opening the files.
 
 .. graphviz::
     
