@@ -25,6 +25,8 @@ Cmake is used for building. A Makefile is also provided for ease of use:
 
     make PREFIX=/apps/mppncc-fast install # Install mppnccombine-fast to $PREFIX
 
+    make doc # Build documentation in doc/_build/html
+
 On Raijin the Makefile loads all required modules
 
 The environment variables `$OPENMPI_ROOT`, `$HDF5_ROOT` and `$NETCDF_ROOT` may

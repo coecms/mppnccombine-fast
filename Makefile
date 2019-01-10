@@ -23,4 +23,9 @@ clean:
 check test: mppnccombine-fast
 	${TEST_ENV} PATH=${BUILD_DIR}:$$PATH py.test
 
+doc:
+	doxygen
+	${MAKE} -C doc html
+
 .SUFFIXES:
+.PHONY: all clean check test doc
