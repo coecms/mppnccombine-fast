@@ -78,7 +78,7 @@ void log_message(int level, const char *message, ...) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     char *rendered;
     int err = vasprintf(&rendered, message, vargs);
-    if (err == 0) {
+    if (err > 0) {
         fprintf(stderr, "[rank %03d] %s\n", rank, rendered);
         free(rendered);
     } else {
