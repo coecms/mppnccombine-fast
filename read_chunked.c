@@ -141,7 +141,7 @@ void get_chunk_offset_shape(
     chunk_shape[i] = chunk[i];
 
     // Count from the chunk boundary to the left of the starting point
-    chunk_offset_out[i] = floorf(local_offset[i] / (float)chunk[i]) * chunk[i] +
+    chunk_offset_out[i] = (size_t)floor(local_offset[i] / (float)chunk[i]) * chunk[i] +
                           chunk[i] * chunkid;
 
     if (chunk_offset_out[i] < local_offset[i]) {
