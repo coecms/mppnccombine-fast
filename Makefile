@@ -7,10 +7,10 @@ ifdef PREFIX
     CMAKE_FLAGS+= -DCMAKE_INSTALL_PREFIX=${PREFIX}
 endif
 
-ifneq (,$(findstring raijin,${HOSTNAME}))
+ifneq (,$(findstring gadi,${HOSTNAME}))
     # raijin.nci.org.au build environment
-    BUILD_ENV=module purge; module load cmake/3.12.2 intel-cc/2019.0.117 netcdf/4.6.1 hdf5/1.10.2 openmpi/3.0.1;
-    TEST_ENV=module purge; module load conda openmpi/3.0.1;
+    BUILD_ENV=module purge; module load cmake/3.16.2 intel-compiler/2020.0.166 netcdf/4.7.3 hdf5/1.10.5 openmpi/4.0.2;
+    TEST_ENV=module purge; module load conda openmpi/4.0.2;
 endif
 
 all .DEFAULT:
