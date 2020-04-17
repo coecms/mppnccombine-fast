@@ -229,6 +229,7 @@ void init(const char *in_path, const char *out_path,
     // Option to override compression
     if (args->deflate_level != -1) {
       deflate_level = args->deflate_level;
+      deflate = 1;
     }
     if (args->shuffle != -1) {
       shuffle = args->shuffle;
