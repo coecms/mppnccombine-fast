@@ -107,6 +107,7 @@ void init(const char *in_path, const char *out_path,
           const struct args_t *args) {
   int in_file;
   int out_file;
+  int err;
 
   // Open both files
   NCERR(nc_open(in_path, NC_NOWRITE, &in_file));
@@ -115,8 +116,8 @@ void init(const char *in_path, const char *out_path,
   if (!args->force) {
     out_flags |= NC_NOCLOBBER;
   }
-  int err = nc_create(out_path, out_flags, &out_file);
-  if (err == -35) {
+  err = nc_create(out_path, out_flags, &out_file);
+  if (err == NC_EEXIST) {
     log_message(LOG_ERROR,
                 "ERROR: Output file '%s' already exists (try --force)",
                 out_path);
@@ -216,7 +217,12 @@ void init(const char *in_path, const char *out_path,
     int shuffle;
     int deflate;
     int deflate_level;
-    NCERR(nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level));
+    err = nc_inq_var_deflate(in_file, v, &shuffle, &deflate, &deflate_level);
+    if (err == NC_ENOTNC4) {
+        shuffle = 1;
+        deflate = 1;
+        deflate_level = 6;
+    }
 
     // Option to override compression
     if (args->deflate_level != -1) {
