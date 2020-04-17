@@ -222,6 +222,8 @@ void init(const char *in_path, const char *out_path,
         shuffle = 1;
         deflate = 1;
         deflate_level = 6;
+    } else {
+        NCERR(err)
     }
 
     // Option to override compression
