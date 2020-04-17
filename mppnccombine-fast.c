@@ -223,7 +223,7 @@ void init(const char *in_path, const char *out_path,
         deflate = 1;
         deflate_level = 6;
     } else {
-        NCERR(err)
+        NCERR(err);
     }
 
     // Option to override compression
