@@ -301,6 +301,8 @@ def test_1degree_nc3(tmpdir):
     c = run_collate(infiles, outpath, args=['--shuffle','--deflate','5'])
 
     assert d.equals(c)
+    assert c.sst.encoding['complevel'] == 5
+    assert c.sst.encoding['shuffle'] == True
 
 def test_unlimited(tmpdir):
     inpath = str(tmpdir.join('test.nc'))
